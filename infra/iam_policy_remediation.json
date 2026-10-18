@@ -1,0 +1,46 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "AutoRemediationLowRisk",
+      "Effect": "Allow",
+      "Action": [
+        "s3:PutBucketAcl",
+        "s3:PutBucketPolicy",
+        "s3:PutPublicAccessBlock",
+        "ec2:RevokeSecurityGroupIngress",
+        "ec2:RevokeSecurityGroupEgress"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "HumanApprovedRemediationOnly",
+      "Effect": "Allow",
+      "Action": [
+        "iam:UpdateAccessKey",
+        "iam:DeleteAccessKey",
+        "iam:DetachUserPolicy",
+        "iam:DetachRolePolicy",
+        "iam:PutUserPolicy",
+        "iam:DeleteUserPolicy",
+        "iam:DeleteLoginProfile",
+        "ec2:TerminateInstances",
+        "ec2:StopInstances",
+        "ec2:CreateSecurityGroup",
+        "ec2:DescribeSecurityGroups",
+        "ec2:ModifyInstanceAttribute",
+        "ecs:UpdateService",
+        "ecs:StopTask",
+        "lambda:PutFunctionConcurrency",
+        "cloudtrail:StartLogging"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "Notifications",
+      "Effect": "Allow",
+      "Action": ["sns:Publish"],
+      "Resource": "*"
+    }
+  ]
+}

@@ -1,0 +1,84 @@
+version: "3.9"
+
+services:
+  redis:
+    image: redis:7-alpine
+    ports: ["6379:6379"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  db:
+    image: postgres:16-alpine
+    ports: ["5432:5432"]
+    environment:
+      POSTGRES_USER: cg
+      POSTGRES_PASSWORD: cg_dev_password
+      POSTGRES_DB: cloud_guardian
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U cg"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+  api:
+    build: .
+    command: uvicorn api.app:app --host 0.0.0.0 --port 8000 --reload
+    ports: ["8000:8000"]
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://cg:cg_dev_password@db:5432/cloud_guardian
+      REDIS_URL: redis://redis:6379/0
+      REDIS_BACKEND_URL: redis://redis:6379/1
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - .:/app
+
+  worker:
+    build: .
+    command: celery -A workers.celery_app worker --loglevel=info --concurrency=4 -Q scans,remediations,default
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://cg:cg_dev_password@db:5432/cloud_guardian
+      REDIS_URL: redis://redis:6379/0
+      REDIS_BACKEND_URL: redis://redis:6379/1
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  beat:
+    build: .
+    command: celery -A workers.celery_app beat --loglevel=info
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://cg:cg_dev_password@db:5432/cloud_guardian
+      REDIS_URL: redis://redis:6379/0
+      REDIS_BACKEND_URL: redis://redis:6379/1
+    depends_on:
+      redis:
+        condition: service_healthy
+
+  frontend:
+    image: node:20-alpine
+    working_dir: /app
+    command: sh -c "npm install && npm run dev -- --host"
+    ports: ["3000:3000"]
+    volumes:
+      - ./frontend:/app
+    environment:
+      VITE_API_URL: http://localhost:8000
+    depends_on:
+      - api
+
+volumes:
+  pgdata:
