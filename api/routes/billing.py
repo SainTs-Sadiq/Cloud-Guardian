@@ -9,7 +9,6 @@ GET  /billing/plans             All available plans (public — no auth required
 """
 import logging
 import os
-from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Header
 from pydantic import BaseModel
@@ -24,11 +23,12 @@ from billing.stripe_config import (
 import billing.stripe_config as _stripe_cfg
 
 STRIPE_WEBHOOK_SECRET = _stripe_cfg.STRIPE_WEBHOOK_SECRET
-from billing.usage_tracker import get_usage_summary, check_alert_limit
+from billing.usage_tracker import get_usage_summary
 from core.auth import CurrentUser, get_current_user, require_role
 from db.engine import get_db
 from db.models.organization import Organization
-from db.repositories.organization_repo import OrganizationRepository, PLAN_LIMITS
+from db.models.stripe_event import ProcessedStripeEvent
+from db.repositories.organization_repo import OrganizationRepository
 
 logger = logging.getLogger("cloud_guardian.api.billing")
 router = APIRouter(prefix="/billing", tags=["Billing"])
@@ -269,25 +269,46 @@ async def stripe_webhook(
     if not STRIPE_WEBHOOK_SECRET:
         raise HTTPException(
             status_code=503,
-            detail="STRIPE_WEBHOOK_SECRET not configured. Set it in your .env file."
+            detail="Stripe webhooks are not configured."
         )
 
     payload = await request.body()
 
+    # Bind stripe BEFORE any use. If the library or key is unavailable, fail
+    # with a clear 503 instead of hitting an unbound name in an except clause.
     try:
         stripe = get_stripe()
+    except Exception as e:
+        logger.error(f"Stripe unavailable for webhook: {type(e).__name__}")
+        raise HTTPException(status_code=503, detail="Stripe is not configured.")
+
+    try:
         event = stripe.Webhook.construct_event(
             payload, stripe_signature, STRIPE_WEBHOOK_SECRET
         )
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid payload")
-    except stripe.error.SignatureVerificationError:
-        raise HTTPException(status_code=400, detail="Invalid Stripe signature")
     except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Webhook error: {e}")
+        # Version-safe signature check: match on the exception name rather
+        # than stripe.error.* (which moved between stripe-python releases).
+        if type(e).__name__ == "SignatureVerificationError":
+            raise HTTPException(status_code=400, detail="Invalid Stripe signature")
+        logger.error(f"Webhook parse failed: {type(e).__name__}")
+        raise HTTPException(status_code=400, detail="Invalid webhook")
 
     event_type = event["type"]
+    event_id = event.get("id") if hasattr(event, "get") else None
     logger.info(f"Stripe webhook received: {event_type}")
+
+    # Dedupe: a replayed event id is acknowledged without re-applying changes.
+    if event_id:
+        already = await db.execute(
+            select(ProcessedStripeEvent).where(ProcessedStripeEvent.event_id == event_id)
+        )
+        if already.scalar_one_or_none() is not None:
+            logger.info(f"Stripe event {event_id} already processed; skipping replay")
+            return {"status": "duplicate", "event": event_type}
+        db.add(ProcessedStripeEvent(event_id=event_id, event_type=event_type))
 
     try:
         if event_type == "checkout.session.completed":
@@ -308,9 +329,13 @@ async def stripe_webhook(
         else:
             logger.debug(f"Unhandled Stripe event type: {event_type}")
 
-    except Exception as e:
-        logger.error(f"Error handling webhook {event_type}: {e}", exc_info=True)
+        if event_id:
+            await db.commit()
 
+    except Exception as e:
+        # Roll back the dedupe row too, so Stripe's retry is processed again.
+        await db.rollback()
+        logger.error(f"Error handling webhook {event_type}: {type(e).__name__}", exc_info=True)
         return {"status": "error_logged", "event": event_type}
 
     return {"status": "ok", "event": event_type}

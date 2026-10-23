@@ -4,22 +4,14 @@ Every analyst action (approve/dismiss) is fed to the learning engine.
 """
 from datetime import datetime, timezone
 from typing import Optional
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from api.models import AlertListResponse, AlertSummary, ApproveRequest, RemediationResponse
+from api.models import AlertListResponse, AlertSummary, RemediationResponse
 from core.audit import audit_log
-
-def _require_destructive_role(aws_account):
-    """No destructive role registered — refuse rather than run destructive
-    actions on the detection/auto role's permissions."""
-    raise HTTPException(status_code=409,
-        detail="No destructive remediation role registered for this AWS account. "
-               "Connect one via POST /accounts (destructive_remediation_role_arn) "
-               "to enable approved destructive actions.")
-
-from core.auth import CurrentUser, get_current_user, require_min_role, require_role
+from core.auth import CurrentUser, require_min_role, require_role
 from config.settings import REMEDIATION
 from db.engine import get_db
 from db.models.aws_account import AWSAccount, AccountStatus
@@ -28,8 +20,7 @@ from db.repositories.incident_repo import IncidentRepository
 from detection.playbooks import get_playbook
 from detection.rule_engine import DetectedAlert
 from detection import remediation_actions as actions
-from learning.engine import record_analyst_action, check_and_apply_learned_playbook
-
+from learning.engine import record_analyst_action
 import logging
 logger = logging.getLogger("cloud_guardian.api.remediation")
 
@@ -54,20 +45,22 @@ def _rebuild_alert(incident) -> DetectedAlert:
         technique_id=incident.technique_id, technique_name=incident.technique_name,
         tactic=incident.tactic, severity=incident.severity, risk_tier=incident.risk_tier,
         description=incident.description, actor_arn=incident.actor_arn,
-        account_id=incident.organization_id, region=incident.aws_region,
+        account_id=incident.aws_account_id or "", region=incident.aws_region,
         source_ip=incident.source_ip, modifiers=incident.modifiers or [], raw_event={},
     )
 
 
 @router.get("/pending", response_model=AlertListResponse)
 async def list_pending(
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
     current_user: CurrentUser = Depends(require_min_role("analyst")),
     db: AsyncSession = Depends(get_db),
 ):
     repo = IncidentRepository(db)
     incidents, total = await repo.list_for_org(
         organization_id=current_user.organization_id,
-        status="pending_approval", limit=200,
+        status="pending_approval", limit=limit, offset=offset,
     )
     alerts = [AlertSummary(
         event_id=i.event_id, source=i.source, event_name=i.event_name,
@@ -78,7 +71,8 @@ async def list_pending(
         remediation_action=(i.remediations[-1].action_type if i.remediations else None),
     ) for i in incidents]
     return AlertListResponse(alerts=alerts, total=total,
-                             filters_applied={"status": "pending_approval"})
+                             filters_applied={"status": "pending_approval",
+                                              "limit": limit, "offset": offset})
 
 
 @router.post("/{incident_id}/approve", response_model=RemediationResponse)
@@ -121,59 +115,66 @@ async def approve_remediation(
         raise HTTPException(status_code=501,
             detail=f"Action '{playbook.action.value}' not implemented")
 
-    try:
-        acct_result = await db.execute(
-            select(AWSAccount).where(
-                AWSAccount.organization_id == current_user.organization_id,
-                AWSAccount.status == AccountStatus.active,
-            ).limit(1)
-        )
-        aws_account = acct_result.scalar_one_or_none()
-        if not aws_account or not aws_account.role_arn:
-            raise HTTPException(status_code=409,
-                detail="No active connected AWS account with a role ARN; refusing to run remediation on platform credentials.")
-        # Fail closed BEFORE creating any session or running any action:
-        # both remediation roles must be registered, or execution stops here.
-        if not aws_account.auto_remediation_role_arn:
-            raise HTTPException(status_code=409,
-                detail="No auto_remediation_role_arn registered for this AWS account; remediation is refused (fail-closed).")
-        if not aws_account.destructive_remediation_role_arn:
-            raise HTTPException(status_code=409,
-                detail="No destructive_remediation_role_arn registered for this AWS account; remediation is refused (fail-closed).")
+    # Fail-closed guards run OUTSIDE any broad except: a guard refusal is a
+    # 409 the client can act on, never a swallowed 500.
+    acct_result = await db.execute(
+        select(AWSAccount).where(
+            AWSAccount.organization_id == current_user.organization_id,
+            AWSAccount.status == AccountStatus.active,
+        ).limit(1)
+    )
+    aws_account = acct_result.scalar_one_or_none()
+    if not aws_account or not aws_account.role_arn:
+        raise HTTPException(status_code=409,
+            detail="No active connected AWS account with a role ARN; refusing to run remediation on platform credentials.")
+    # Both remediation roles must be registered before any session is built.
+    if not aws_account.auto_remediation_role_arn:
+        raise HTTPException(status_code=409,
+            detail="No auto_remediation_role_arn registered for this AWS account; remediation is refused (fail-closed).")
+    if not aws_account.destructive_remediation_role_arn:
+        raise HTTPException(status_code=409,
+            detail="No destructive_remediation_role_arn registered for this AWS account; remediation is refused (fail-closed).")
 
-        from core.aws_session import get_session_for_account
-        from detection import remediation_actions as _ra
+    from core.aws_session import get_session_for_account
+    from detection import remediation_actions as _ra
+    try:
         auto_session = get_session_for_account(
             role_arn=aws_account.auto_remediation_role_arn,
             external_id=aws_account.external_id,
             region=aws_account.primary_region, org_id=current_user.organization_id,
             aws_account_id=aws_account.aws_account_id,
         )
-        # Explicit human blessing -> the DESTRUCTIVE role, a distinct set of
-        # credentials from the auto role by IAM design.
         destr_session = get_session_for_account(
             role_arn=aws_account.destructive_remediation_role_arn,
             external_id=aws_account.external_id,
             region=aws_account.primary_region, org_id=current_user.organization_id,
             aws_account_id=aws_account.aws_account_id,
         )
-        _ra.set_action_session(auto_session, destructive=False)
-        _ra.set_action_session(destr_session, destructive=True)
-        try:
-            success, detail = handler(alert)
-        finally:
-            _ra.clear_action_session()
     except Exception as e:
-        logger.error(f"Remediation failed for {incident_id}: {e}", exc_info=True)
+        logger.error(f"Remediation session setup failed for {incident_id}: {type(e).__name__}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Remediation could not be started. See server logs.")
+
+    # Per-call binding: the sessions exist only for this handler call.
+    try:
+        with _ra.remediation_sessions(auto=auto_session, destructive=destr_session):
+            success, detail = handler(alert)
+    except _ra.RemediationGuardError as guard:
+        # Guard refused (e.g. destructive session missing): fail closed as 409.
+        logger.warning(f"Remediation guard refused {incident_id}: {guard}")
+        raise HTTPException(status_code=409,
+            detail="Remediation refused by a fail-closed guard: a required remediation role session is not available.")
+    except Exception as e:
+        logger.error(f"Remediation failed for {incident_id}: {type(e).__name__}", exc_info=True)
         await repo.add_remediation_record(
             incident_id=incident_id, organization_id=current_user.organization_id,
             action_type=playbook.action.value, action_risk_tier=playbook.action_risk_tier.value,
-            decision="auto_executed", detail=str(e), approved_by_id=current_user.id,
-            success=False, error_message=str(e),
+            decision="auto_executed", detail="execution error (see server logs)",
+            approved_by_id=current_user.id, success=False,
+            error_message=type(e).__name__,
         )
         await repo.update_status(incident_id, current_user.organization_id,
                                  IncidentStatus.remediation_failed)
-        raise HTTPException(status_code=500, detail=f"Remediation failed: {e}")
+        raise HTTPException(status_code=500, detail="Remediation failed. See server logs.")
 
     new_status = IncidentStatus.remediated if success else IncidentStatus.remediation_failed
     await repo.update_status(incident_id, current_user.organization_id, new_status,
@@ -227,6 +228,7 @@ async def approve_remediation(
 async def dismiss_incident(
     incident_id: str,
     body: DismissRequest,
+    request: Request,
     current_user: CurrentUser = Depends(require_min_role("analyst")),
     db: AsyncSession = Depends(get_db),
 ):

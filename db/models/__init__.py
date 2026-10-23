@@ -7,6 +7,7 @@ from db.models.audit import AuditLog
 from db.models.playbook_memory import PlaybookMemory, PlaybookObservation, PlaybookVersion, PlaybookStatus, LIFECYCLE_DESCRIPTIONS
 from db.models.scan_run import ScanRun, ScanRunStatus, ScanTrigger
 from db.models.asset import Asset
+from db.models.stripe_event import ProcessedStripeEvent
 
 __all__ = [
     "Organization", "PlanTier", "ScanFrequency",

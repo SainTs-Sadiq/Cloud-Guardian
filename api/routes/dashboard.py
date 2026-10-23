@@ -23,7 +23,6 @@ from db.models.incident import Incident
 from db.repositories.incident_repo import IncidentRepository
 from db.repositories.asset_repo import AssetRepository
 from db.repositories.scan_run_repo import ScanRunRepository
-from detection.compliance_mappings import COMPLIANCE_MAP
 from detection.risk_score import compute_risk_score
 
 router = APIRouter(prefix="/dashboard", tags=["Dashboard"])

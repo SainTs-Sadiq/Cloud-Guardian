@@ -67,7 +67,7 @@ EVENT_TECHNIQUE_MAP = {
     "ModifySnapshotAttribute": TechniqueMapping("T1537","Transfer Data to Cloud Account",Tactic.EXFILTRATION,65,RiskTier.HIGH,"Snapshot permissions modified - could share to external account"),
     "DeleteBucket": TechniqueMapping("T1485","Data Destruction",Tactic.IMPACT,70,RiskTier.CRITICAL,"S3 bucket deleted"),
     "DeleteDBInstance": TechniqueMapping("T1485","Data Destruction",Tactic.IMPACT,75,RiskTier.CRITICAL,"RDS instance deleted"),
-    "TerminateInstances": TechniqueMapping("T1561","Disk Wipe",Tactic.IMPACT,50,RiskTier.HIGH,"EC2 instance(s) terminated"),
+    "TerminateInstances": TechniqueMapping("T1485","Data Destruction",Tactic.IMPACT,50,RiskTier.HIGH,"EC2 instance(s) terminated"),
 
     # ---- Tier-1 expansion (2026-10-22, validated against MITRE ATT&CK enterprise-attack.json) ----
     # Persistence / credential theft

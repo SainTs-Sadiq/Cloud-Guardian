@@ -2,11 +2,10 @@ import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from enum import Enum
+from botocore.exceptions import BotoCoreError, ClientError
 from config.settings import REMEDIATION
-from detection.mitre_mappings import RiskTier
 from detection.playbooks import ActionType, get_playbook
 from detection.rule_engine import DetectedAlert
-from detection.storage import AlertStore
 
 logger = logging.getLogger("cloud_guardian.remediation")
 
@@ -93,14 +92,19 @@ def approve_remediation(event_id, store):
 
 def _execute_action(alert, playbook):
     from detection import remediation_actions as actions
+    handler = getattr(actions, playbook.action.value, None)
+    if handler is None:
+        return False, f"No handler implemented for action '{playbook.action.value}'"
     try:
-        handler = getattr(actions, playbook.action.value, None)
-        if handler is None:
-            return False, f"No handler implemented for action '{playbook.action.value}'"
         return handler(alert)
+    except actions.RemediationGuardError:
+        # Fail-closed guard refusal: must NOT be converted into a generic
+        # failure string. Propagate so the caller can block/409 it.
+        raise
     except Exception as e:
-        logger.error(f"[{alert.event_id}] Remediation action failed: {e}", exc_info=True)
-        return False, f"Execution error: {e}"
+        # Log the detail server-side; return a generic message (no raw error text).
+        logger.error(f"[{alert.event_id}] Remediation action failed: {type(e).__name__}", exc_info=True)
+        return False, f"Execution error ({type(e).__name__}); see server logs"
 
 def _send_notification(alert, playbook, auto, requires_approval=False):
     if not REMEDIATION.notification_topic_arn:
@@ -119,8 +123,10 @@ def _send_notification(alert, playbook, auto, requires_approval=False):
         if AWS.profile: kwargs["profile_name"] = AWS.profile
         boto3.Session(**kwargs).client("sns", region_name=AWS.region).publish(
             TopicArn=REMEDIATION.notification_topic_arn, Subject=subject[:100], Message=message)
-    except Exception as e:
-        logger.error(f"SNS notification failed: {e}")
+    except (ClientError, BotoCoreError) as e:
+        # Notification is best-effort; never let it break the remediation flow,
+        # and do not echo the raw AWS error text.
+        logger.error(f"SNS notification failed: {type(e).__name__}")
 
 def _cli():
     import argparse, sys

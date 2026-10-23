@@ -1,36 +1,61 @@
 """Concrete boto3 remediation action implementations."""
+import contextlib
+import contextvars
 import json
 import logging
 from datetime import datetime, timezone
-import boto3
 from botocore.exceptions import ClientError
 from config.settings import AWS
 
 logger = logging.getLogger("cloud_guardian.remediation_actions")
 
+
+class RemediationGuardError(RuntimeError):
+    """A fail-closed guard refused to run an action (missing role session,
+    destructive action on the auto path, etc.). Callers map this to a
+    conflict / blocked outcome, never to a generic execution error."""
+
+
 # Two session slots: low-risk auto actions and destructive (human-approved)
 # actions each use their own customer role. An auto-tier action can never
 # reach destructive permissions because its role simply doesn't have them.
-_auto_session = None
-_destructive_session = None
+#
+# The slots are ContextVars, not module globals, so a binding made for one
+# Celery task or HTTP request cannot leak into another task that happens to
+# run later on the same long-lived worker thread. Bind with
+# remediation_sessions(...) (preferred) or set_action_session(...).
+_auto_session_var: contextvars.ContextVar = contextvars.ContextVar("ra_auto_session", default=None)
+_destructive_session_var: contextvars.ContextVar = contextvars.ContextVar("ra_destructive_session", default=None)
+
 
 def set_action_session(session, destructive=False):
     """Inject the customer's assumed-role session so actions run with the
     customer's credentials, never the platform's default chain."""
-    global _auto_session, _destructive_session
-    if destructive:
-        _destructive_session = session
-    else:
-        _auto_session = session
+    var = _destructive_session_var if destructive else _auto_session_var
+    var.set(session)
+
 
 def clear_action_session(destructive=None):
-    global _auto_session, _destructive_session
     if destructive is None:
-        _auto_session = _destructive_session = None
+        _auto_session_var.set(None)
+        _destructive_session_var.set(None)
     elif destructive:
-        _destructive_session = None
+        _destructive_session_var.set(None)
     else:
-        _auto_session = None
+        _auto_session_var.set(None)
+
+
+@contextlib.contextmanager
+def remediation_sessions(auto=None, destructive=None):
+    """Bind the auto and/or destructive sessions for exactly one call and
+    restore the previous binding on exit, even on error."""
+    tok_auto = _auto_session_var.set(auto)
+    tok_destr = _destructive_session_var.set(destructive)
+    try:
+        yield
+    finally:
+        _auto_session_var.reset(tok_auto)
+        _destructive_session_var.reset(tok_destr)
 
 # Actions that exceed the auto-approval tier regardless of playbook metadata
 # Destructive handlers: _client() refuses to serve them without the
@@ -45,17 +70,17 @@ def _client(service, region=None):
     import inspect
     handler_name = inspect.currentframe().f_back.f_code.co_name
     if handler_name in DESTRUCTIVE_ACTIONS:
-        session = _destructive_session
+        session = _destructive_session_var.get()
         if session is None:
-            raise RuntimeError(
+            raise RemediationGuardError(
                 f"'{handler_name}' is a destructive action and requires the "
                 "human-approved remediation role (destructive session not set)."
             )
     else:
-        session = _auto_session or _destructive_session
+        session = _auto_session_var.get() or _destructive_session_var.get()
     if session is not None:
         return session.client(service, region_name=region or AWS.region)
-    raise RuntimeError(
+    raise RemediationGuardError(
         "No customer AWS session configured for remediation. "
         "Call set_action_session(get_session_for_account(...)) before executing actions; "
         "falling back to the platform's default credential chain is not allowed."

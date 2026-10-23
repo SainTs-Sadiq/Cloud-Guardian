@@ -24,14 +24,12 @@ Task structure:
         → fans out retrain_anomaly_model for every active org
 """
 import asyncio
-import logging
 import os
 from sqlalchemy.exc import IntegrityError
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
 
-from celery import shared_task
 from celery.utils.log import get_task_logger
 
 from workers.celery_app import app
@@ -247,12 +245,10 @@ async def _record_scan_run_result(scan_run_id, success, findings_count, error_me
 
 def _scan_region(session, region, aws_account_db_id, aws_account_id, org_id, lookback_minutes, use_ml):
     """Inner: scan one region, persist results. Returns alert count."""
-    import boto3
-
 
     from detection import cloudtrail_ingest, guardduty_ingest
     from detection.rule_engine import score_event
-    from config.settings import DETECTION, REMEDIATION
+    from config.settings import DETECTION
 
 
     original_ct_client = cloudtrail_ingest.get_cloudtrail_client
@@ -509,8 +505,31 @@ def execute_remediation(
         result = _run_async(_do_remediation(incident_id, org_id, approved_by_id, auto))
         return result
     except Exception as exc:
-        logger.error(f"Remediation task failed for {incident_id}: {exc}", exc_info=True)
+        # Fail-closed guard refusals are final: never retry them and never
+        # log the raw credential/ARN text back out.
+        from detection.remediation_actions import RemediationGuardError
+        if isinstance(exc, RemediationGuardError):
+            logger.error(f"Remediation refused for {incident_id} by guard")
+            return {"status": "blocked", "detail": "remediation refused by fail-closed guard"}
+        logger.error(f"Remediation task failed for {incident_id}: {type(exc).__name__}", exc_info=True)
         raise self.retry(exc=exc)
+
+
+async def _load_account_for_incident(db, incident, org_id):
+    """Return the AWSAccount linked to this incident, scoped to its org.
+    Incident.aws_account_id stores the 12-digit AWS account number, which
+    matches AWSAccount.aws_account_id. None if missing (caller fails closed)."""
+    from sqlalchemy import select
+    from db.models.aws_account import AWSAccount
+    if not getattr(incident, "aws_account_id", None):
+        return None
+    res = await db.execute(
+        select(AWSAccount).where(
+            AWSAccount.aws_account_id == incident.aws_account_id,
+            AWSAccount.organization_id == org_id,
+        )
+    )
+    return res.scalar_one_or_none()
 
 
 async def _do_remediation(incident_id, org_id, approved_by_id, auto):
@@ -526,6 +545,9 @@ async def _do_remediation(incident_id, org_id, approved_by_id, auto):
         incident = await repo.get_by_id(incident_id, org_id)
         if not incident:
             return {"status": "error", "detail": f"Incident {incident_id} not found"}
+        # The incident is linked to its AWS account by FK (aws_account_id).
+        # Load the real account record; never trust a missing or guessed one.
+        aws_account = await _load_account_for_incident(db, incident, org_id)
 
         alert = DetectedAlert(
             event_id=incident.event_id, source=incident.source,
@@ -533,7 +555,7 @@ async def _do_remediation(incident_id, org_id, approved_by_id, auto):
             technique_id=incident.technique_id, technique_name=incident.technique_name,
             tactic=incident.tactic, severity=incident.severity, risk_tier=incident.risk_tier,
             description=incident.description, actor_arn=incident.actor_arn,
-            account_id=aws_account.aws_account_id if aws_account else (incident.raw_event or {}).get("account_id", incident.organization_id),
+            account_id=aws_account.aws_account_id if aws_account else "",
             region=incident.aws_region,
             source_ip=incident.source_ip, modifiers=incident.modifiers or [], raw_event={},
         )
@@ -543,45 +565,63 @@ async def _do_remediation(incident_id, org_id, approved_by_id, auto):
             return {"status": "no_playbook"}
 
         handler = getattr(actions, playbook.action.value, None)
+        is_destructive = playbook.action.value in getattr(actions, "DESTRUCTIVE_ACTIONS", set())
         if not handler:
             success, detail = False, f"No handler for {playbook.action.value}"
-        elif (auto and
-              playbook.action.value in getattr(actions, "DESTRUCTIVE_ACTIONS", set())):
+        elif auto and is_destructive:
             # Server-side guard: a misconfigured playbook can never route a
             # destructive handler through the auto path.
-            success, detail = False, (
-                f"Handler '{playbook.action.value}' is destructive and cannot "
-                "run via auto-remediation; requires explicit human approval.")
             logger.warning(f"[{alert.event_id}] BLOCKED auto-remediation of destructive handler")
+            return {"status": "blocked", "detail": (
+                f"Handler '{playbook.action.value}' is destructive and cannot "
+                "run via auto-remediation; requires explicit human approval.")}
+        elif not aws_account or not aws_account.role_arn:
+            # Fail closed: no account row means no customer credentials to use.
+            logger.error(f"Remediation blocked for incident {incident_id}: AWS account missing or has no role ARN")
+            return {"status": "blocked", "detail": (
+                "No active AWS account with a role ARN for this incident; "
+                "refusing platform-credential remediation (fail-closed).")}
         else:
-            if not aws_account or not aws_account.role_arn:
-                success, detail = False, "No active AWS account with role ARN; refusing platform-credential remediation"
-            else:
-                from core.aws_session import get_session_for_account
-                # Auto-remediation uses ONLY the low-risk auto role. Fail
-                # closed: without a separately configured auto role, refuse.
-                auto_arn = aws_account.auto_remediation_role_arn
-                if not auto_arn:
-                    # Fail closed and return BEFORE creating any session.
-                    logger.error(
-                        f"Remediation blocked for incident {incident_id}: no "
-                        "auto_remediation_role_arn registered (fail-closed).")
-                    return {"status": "blocked", "detail": (
-                        "No auto_remediation_role_arn registered for this AWS "
-                        "account; refusing to run remediation on the detection "
-                        "role (fail-closed).")}
-                customer_session = get_session_for_account(
-                    role_arn=auto_arn, external_id=aws_account.external_id,
-                    region=aws_account.primary_region, org_id=org_id,
-                    aws_account_id=aws_account.aws_account_id,
-                )
-                # Celery auto-remediation never receives the destructive role —
-                # low-risk only, enforced by IAM in the customer's account.
-                actions.set_action_session(customer_session, destructive=False)
+            from core.aws_session import get_session_for_account
+            # Both roles must be registered before anything runs (fail-closed).
+            # Auto runs use only the low-risk auto role; approved destructive
+            # runs must have the destructive role too.
+            auto_arn = aws_account.auto_remediation_role_arn
+            destr_arn = aws_account.destructive_remediation_role_arn
+            if not auto_arn:
+                # Fail closed and return BEFORE creating any session.
+                logger.error(
+                    f"Remediation blocked for incident {incident_id}: no "
+                    "auto_remediation_role_arn registered (fail-closed).")
+                return {"status": "blocked", "detail": (
+                    "No auto_remediation_role_arn registered for this AWS "
+                    "account; refusing to run remediation on the detection "
+                    "role (fail-closed).")}
+            if not destr_arn:
+                logger.error(
+                    f"Remediation blocked for incident {incident_id}: no "
+                    "destructive_remediation_role_arn registered (fail-closed).")
+                return {"status": "blocked", "detail": (
+                    "No destructive_remediation_role_arn registered for this "
+                    "AWS account; remediation is refused (fail-closed).")}
+            customer_session = get_session_for_account(
+                role_arn=auto_arn, external_id=aws_account.external_id,
+                region=aws_account.primary_region, org_id=org_id,
+                aws_account_id=aws_account.aws_account_id,
+            )
+            destr_session = get_session_for_account(
+                role_arn=destr_arn, external_id=aws_account.external_id,
+                region=aws_account.primary_region, org_id=org_id,
+                aws_account_id=aws_account.aws_account_id,
+            ) if not auto else None
+            # Per-call binding: sessions exist only for this handler call and
+            # are reset on exit, so nothing leaks to the next task.
+            with actions.remediation_sessions(auto=customer_session, destructive=destr_session):
                 try:
                     success, detail = handler(alert)
-                finally:
-                    actions.clear_action_session(destructive=False)
+                except actions.RemediationGuardError as guard:
+                    logger.error(f"[{incident_id}] guard refused action: {guard}")
+                    return {"status": "blocked", "detail": str(guard)}
 
         new_status = IncidentStatus.remediated if success else IncidentStatus.remediation_failed
         resolved_at = datetime.now(timezone.utc) if success else None
