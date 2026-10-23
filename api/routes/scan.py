@@ -15,6 +15,8 @@ from detection.cloudtrail_ingest import fetch_recent_events
 from detection.guardduty_ingest import fetch_findings
 from pydantic import BaseModel, Field
 from sqlalchemy import select
+import asyncio
+
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.models import ScanRequest, ScanResponse
@@ -342,7 +344,18 @@ async def sync_scan(
     )
 
 
+_sync_scan_lock = asyncio.Lock()  # guards module-global client swaps in the sync path
+
+
 async def _run_sync_scan(accounts, org_id, db, lookback_minutes, use_ml) -> tuple[str, int]:
+    """Serialize sync scans: this path temporarily replaces module-global
+    boto3 client factories, so concurrent scans could swap each other's
+    customers' clients mid-flight (cross-tenant credential mixup)."""
+    async with _sync_scan_lock:
+        return await _run_sync_scan_locked(accounts, org_id, db, lookback_minutes, use_ml)
+
+
+async def _run_sync_scan_locked(accounts, org_id, db, lookback_minutes, use_ml) -> tuple[str, int]:
     """
     Inline synchronous scan used when Redis isn't available (local/dev).
 

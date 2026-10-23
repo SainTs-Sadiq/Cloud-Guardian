@@ -20,7 +20,12 @@ from datetime import datetime, timedelta, timezone
 from jose import JWTError, jwt
 from passlib.context import CryptContext
 
-SECRET_KEY = os.environ.get("SECRET_KEY", "CHANGE_THIS_IN_PRODUCTION_USE_OPENSSL_RAND_HEX_32")
+SECRET_KEY=os.environ.get("SECRET_KEY", "")
+if not SECRET_KEY or SECRET_KEY.startswith("CHANGE_THIS"):
+    raise RuntimeError(
+        "SECRET_KEY is not set or uses the insecure placeholder. "
+        "Generate one with: openssl rand -hex 32"
+    )
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = int(os.environ.get("ACCESS_TOKEN_EXPIRE_MINUTES", "30"))
 REFRESH_TOKEN_EXPIRE_DAYS = int(os.environ.get("REFRESH_TOKEN_EXPIRE_DAYS", "7"))

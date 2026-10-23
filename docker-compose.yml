@@ -15,7 +15,7 @@ services:
     ports: ["5432:5432"]
     environment:
       POSTGRES_USER: cg
-      POSTGRES_PASSWORD: cg_dev_password
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
       POSTGRES_DB: cloud_guardian
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U cg"]

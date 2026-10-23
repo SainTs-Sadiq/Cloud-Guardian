@@ -4,14 +4,25 @@ Every analyst action (approve/dismiss) is fed to the learning engine.
 """
 from datetime import datetime, timezone
 from typing import Optional
-from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from fastapi import APIRouter, Depends, HTTPException, Request
+from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.models import AlertListResponse, AlertSummary, ApproveRequest, RemediationResponse
+from core.audit import audit_log
+
+def _require_destructive_role(aws_account):
+    """No destructive role registered — refuse rather than run destructive
+    actions on the detection/auto role's permissions."""
+    raise HTTPException(status_code=409,
+        detail="No destructive remediation role registered for this AWS account. "
+               "Connect one via POST /accounts (destructive_remediation_role_arn) "
+               "to enable approved destructive actions.")
+
 from core.auth import CurrentUser, get_current_user, require_min_role, require_role
 from config.settings import REMEDIATION
 from db.engine import get_db
+from db.models.aws_account import AWSAccount, AccountStatus
 from db.models.incident import IncidentStatus
 from db.repositories.incident_repo import IncidentRepository
 from detection.playbooks import get_playbook
@@ -32,8 +43,8 @@ class DismissRequest(BaseModel):
 
 class ApproveWithNotesRequest(BaseModel):
     confirmed: bool
-    analyst_notes: Optional[str] = None
-    investigation_steps: Optional[list[str]] = None
+    analyst_notes: Optional[str] = Field(default=None, max_length=2000)
+    investigation_steps: Optional[list[str]] = Field(default=None, max_length=50)
 
 
 def _rebuild_alert(incident) -> DetectedAlert:
@@ -73,6 +84,7 @@ async def list_pending(
 @router.post("/{incident_id}/approve", response_model=RemediationResponse)
 async def approve_remediation(
     incident_id: str,
+    request: Request,
     body: ApproveWithNotesRequest,
     current_user: CurrentUser = Depends(require_role("admin", "owner")),
     db: AsyncSession = Depends(get_db),
@@ -110,7 +122,47 @@ async def approve_remediation(
             detail=f"Action '{playbook.action.value}' not implemented")
 
     try:
-        success, detail = handler(alert)
+        acct_result = await db.execute(
+            select(AWSAccount).where(
+                AWSAccount.organization_id == current_user.organization_id,
+                AWSAccount.status == AccountStatus.active,
+            ).limit(1)
+        )
+        aws_account = acct_result.scalar_one_or_none()
+        if not aws_account or not aws_account.role_arn:
+            raise HTTPException(status_code=409,
+                detail="No active connected AWS account with a role ARN; refusing to run remediation on platform credentials.")
+        # Fail closed BEFORE creating any session or running any action:
+        # both remediation roles must be registered, or execution stops here.
+        if not aws_account.auto_remediation_role_arn:
+            raise HTTPException(status_code=409,
+                detail="No auto_remediation_role_arn registered for this AWS account; remediation is refused (fail-closed).")
+        if not aws_account.destructive_remediation_role_arn:
+            raise HTTPException(status_code=409,
+                detail="No destructive_remediation_role_arn registered for this AWS account; remediation is refused (fail-closed).")
+
+        from core.aws_session import get_session_for_account
+        from detection import remediation_actions as _ra
+        auto_session = get_session_for_account(
+            role_arn=aws_account.auto_remediation_role_arn,
+            external_id=aws_account.external_id,
+            region=aws_account.primary_region, org_id=current_user.organization_id,
+            aws_account_id=aws_account.aws_account_id,
+        )
+        # Explicit human blessing -> the DESTRUCTIVE role, a distinct set of
+        # credentials from the auto role by IAM design.
+        destr_session = get_session_for_account(
+            role_arn=aws_account.destructive_remediation_role_arn,
+            external_id=aws_account.external_id,
+            region=aws_account.primary_region, org_id=current_user.organization_id,
+            aws_account_id=aws_account.aws_account_id,
+        )
+        _ra.set_action_session(auto_session, destructive=False)
+        _ra.set_action_session(destr_session, destructive=True)
+        try:
+            success, detail = handler(alert)
+        finally:
+            _ra.clear_action_session()
     except Exception as e:
         logger.error(f"Remediation failed for {incident_id}: {e}", exc_info=True)
         await repo.add_remediation_record(
@@ -126,6 +178,11 @@ async def approve_remediation(
     new_status = IncidentStatus.remediated if success else IncidentStatus.remediation_failed
     await repo.update_status(incident_id, current_user.organization_id, new_status,
         resolved_at=datetime.now(timezone.utc) if success else None)
+    await audit_log(db, organization_id=current_user.organization_id, user_id=current_user.id,
+        action="remediation.approved", resource_type="incident", resource_id=incident_id,
+        detail=f"action={playbook.action.value} success={success} {detail}"[:2000],
+        ip_address=request.client.host if request.client else None,
+        user_agent=(request.headers.get("user-agent") or "")[:255])
     await repo.add_remediation_record(
         incident_id=incident_id, organization_id=current_user.organization_id,
         action_type=playbook.action.value, action_risk_tier=playbook.action_risk_tier.value,
@@ -184,6 +241,11 @@ async def dismiss_incident(
 
     await repo.update_status(incident_id, current_user.organization_id,
         IncidentStatus.false_positive, false_positive_reason=body.reason)
+    await audit_log(db, organization_id=current_user.organization_id, user_id=current_user.id,
+        action="incident.dismissed", resource_type="incident", resource_id=incident_id,
+        detail=(body.reason or "")[:2000],
+        ip_address=request.client.host if request.client else None,
+        user_agent=(request.headers.get("user-agent") or "")[:255])
 
     alert = _rebuild_alert(incident)
     try:

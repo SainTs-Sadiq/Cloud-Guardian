@@ -26,6 +26,7 @@ Task structure:
 import asyncio
 import logging
 import os
+from sqlalchemy.exc import IntegrityError
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
@@ -354,31 +355,36 @@ async def _persist_incidents(incidents, aws_account_db_id, org_id):
             if existing:
                 continue
 
-            incident = await repo.create(
-                organization_id=org_id,
-                aws_account_db_id=aws_account_db_id,
-                event_id=alert.event_id,
-                source=alert.source,
-                event_name=alert.event_name,
-                event_time=alert.event_time if isinstance(alert.event_time, datetime)
-                           else datetime.now(timezone.utc),
-                technique_id=alert.technique_id,
-                technique_name=alert.technique_name,
-                tactic=alert.tactic,
-                severity=alert.severity,
-                risk_tier=alert.risk_tier,
-                description=alert.description,
-                actor_arn=alert.actor_arn,
-                aws_region=alert.region,
-                source_ip=alert.source_ip,
-                modifiers=alert.modifiers,
-                ml_anomaly_score=ml_score,
-                service=getattr(alert, "service", None),
-                resource_id=getattr(alert, "resource_id", None),
-                title=getattr(alert, "title", None),
-                recommendation=getattr(alert, "recommendation", None),
-                compliance=getattr(alert, "compliance", None),
-            )
+            try:
+                incident = await repo.create(
+                    organization_id=org_id,
+                    aws_account_db_id=aws_account_db_id,
+                    event_id=alert.event_id,
+                    source=alert.source,
+                    event_name=alert.event_name,
+                    event_time=alert.event_time if isinstance(alert.event_time, datetime)
+                               else datetime.now(timezone.utc),
+                    technique_id=alert.technique_id,
+                    technique_name=alert.technique_name,
+                    tactic=alert.tactic,
+                    severity=alert.severity,
+                    risk_tier=alert.risk_tier,
+                    description=alert.description,
+                    actor_arn=alert.actor_arn,
+                    aws_region=alert.region,
+                    source_ip=alert.source_ip,
+                    modifiers=alert.modifiers,
+                    ml_anomaly_score=ml_score,
+                    service=getattr(alert, "service", None),
+                    resource_id=getattr(alert, "resource_id", None),
+                    title=getattr(alert, "title", None),
+                    recommendation=getattr(alert, "recommendation", None),
+                    compliance=getattr(alert, "compliance", None),
+                )
+            except IntegrityError:
+                # concurrent worker inserted the same (org, event) first — dedup constraint won
+                await db.rollback()
+                continue
             await db.commit()
 
 
@@ -527,7 +533,8 @@ async def _do_remediation(incident_id, org_id, approved_by_id, auto):
             technique_id=incident.technique_id, technique_name=incident.technique_name,
             tactic=incident.tactic, severity=incident.severity, risk_tier=incident.risk_tier,
             description=incident.description, actor_arn=incident.actor_arn,
-            account_id=incident.organization_id, region=incident.aws_region,
+            account_id=aws_account.aws_account_id if aws_account else (incident.raw_event or {}).get("account_id", incident.organization_id),
+            region=incident.aws_region,
             source_ip=incident.source_ip, modifiers=incident.modifiers or [], raw_event={},
         )
 
@@ -536,8 +543,45 @@ async def _do_remediation(incident_id, org_id, approved_by_id, auto):
             return {"status": "no_playbook"}
 
         handler = getattr(actions, playbook.action.value, None)
-        success, detail = (False, f"No handler for {playbook.action.value}") if not handler \
-                          else handler(alert)
+        if not handler:
+            success, detail = False, f"No handler for {playbook.action.value}"
+        elif (auto and
+              playbook.action.value in getattr(actions, "DESTRUCTIVE_ACTIONS", set())):
+            # Server-side guard: a misconfigured playbook can never route a
+            # destructive handler through the auto path.
+            success, detail = False, (
+                f"Handler '{playbook.action.value}' is destructive and cannot "
+                "run via auto-remediation; requires explicit human approval.")
+            logger.warning(f"[{alert.event_id}] BLOCKED auto-remediation of destructive handler")
+        else:
+            if not aws_account or not aws_account.role_arn:
+                success, detail = False, "No active AWS account with role ARN; refusing platform-credential remediation"
+            else:
+                from core.aws_session import get_session_for_account
+                # Auto-remediation uses ONLY the low-risk auto role. Fail
+                # closed: without a separately configured auto role, refuse.
+                auto_arn = aws_account.auto_remediation_role_arn
+                if not auto_arn:
+                    # Fail closed and return BEFORE creating any session.
+                    logger.error(
+                        f"Remediation blocked for incident {incident_id}: no "
+                        "auto_remediation_role_arn registered (fail-closed).")
+                    return {"status": "blocked", "detail": (
+                        "No auto_remediation_role_arn registered for this AWS "
+                        "account; refusing to run remediation on the detection "
+                        "role (fail-closed).")}
+                customer_session = get_session_for_account(
+                    role_arn=auto_arn, external_id=aws_account.external_id,
+                    region=aws_account.primary_region, org_id=org_id,
+                    aws_account_id=aws_account.aws_account_id,
+                )
+                # Celery auto-remediation never receives the destructive role —
+                # low-risk only, enforced by IAM in the customer's account.
+                actions.set_action_session(customer_session, destructive=False)
+                try:
+                    success, detail = handler(alert)
+                finally:
+                    actions.clear_action_session(destructive=False)
 
         new_status = IncidentStatus.remediated if success else IncidentStatus.remediation_failed
         resolved_at = datetime.now(timezone.utc) if success else None

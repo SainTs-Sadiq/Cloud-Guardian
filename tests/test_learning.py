@@ -422,7 +422,7 @@ class TestLearningAPI:
     def test_approve_not_found_returns_404(self, auth_client):
         tokens = self._reg(auth_client, "learn-app404", "app404@learn.com")
         r = auth_client.post("/learning/playbooks/nonexistent/approve",
-                             headers=self._auth(tokens), json={"notes": "test"})
+                             headers=self._auth(tokens), json={"notes": "test", "confirmed": True})
         assert r.status_code == 404
 
     def test_approve_requires_admin(self, auth_client):

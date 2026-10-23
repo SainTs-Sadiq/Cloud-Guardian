@@ -1,3 +1,8 @@
+import os
+
+os.environ.setdefault('CG_RATE_LIMIT_GLOBAL', '1000000')
+os.environ.setdefault('CG_RATE_LIMIT_AUTH', '1000000')
+
 """
 Shared test fixtures — provides a reusable async-safe in-memory SQLite DB
 for API-level tests that need the FastAPI app with a real DB session.
@@ -10,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from fastapi.testclient import TestClient
 
 os.environ.setdefault("DATABASE_URL", "sqlite+aiosqlite:///:memory:")
+os.environ.setdefault("SECRET_KEY", "test-secret-key-not-for-production-0123456789abcdef")
 
 from db.engine import Base, get_db
 from api.app import app

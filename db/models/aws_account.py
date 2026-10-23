@@ -51,6 +51,11 @@ class AWSAccount(Base):
     aws_account_id: Mapped[str] = mapped_column(String(12), nullable=False, index=True)
     display_name: Mapped[str] = mapped_column(String(255), nullable=False)
     role_arn: Mapped[str] = mapped_column(String(255), nullable=False)
+    # Separate remediation roles. auto_remediation_role_arn must NEVER grant
+    # destructive permissions; destructive_remediation_role_arn is only used
+    # after an explicit human approval (API route, never celery).
+    auto_remediation_role_arn: Mapped[str | None] = mapped_column(String(255))
+    destructive_remediation_role_arn: Mapped[str | None] = mapped_column(String(255))
 
     external_id: Mapped[str | None] = mapped_column(String(100))
 

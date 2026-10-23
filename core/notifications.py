@@ -13,10 +13,29 @@ against previous notifications.
 """
 import logging
 
+import socket
+
 import httpx
 
 logger = logging.getLogger("cloud_guardian.notifications")
 
+
+def _validate_webhook_url(url: str, org_id) -> None:
+    """Reject non-https and internal/loopback/link-local targets (SSRF guard)."""
+    import ipaddress
+    from urllib.parse import urlparse
+    parsed = urlparse(url)
+    if parsed.scheme != "https" or not parsed.hostname:
+        raise ValueError(f"org {org_id} webhook must be a valid https URL")
+    try:
+        infos = socket.getaddrinfo(parsed.hostname, parsed.port or 443, proto=socket.IPPROTO_TCP)
+    except socket.gaierror as e:
+        raise ValueError(f"org {org_id} webhook hostname does not resolve: {e}")
+    for info in infos:
+        ip = ipaddress.ip_address(info[4][0])
+        if (ip.is_private or ip.is_loopback or ip.is_link_local
+                or ip.is_reserved or ip.is_multicast):
+            raise ValueError(f"org {org_id} webhook resolves to a forbidden address ({ip})")
 
 async def send_scan_notification(org, scan_run, severity_counts: dict) -> bool:
     """
@@ -25,6 +44,12 @@ async def send_scan_notification(org, scan_run, severity_counts: dict) -> bool:
     notification failure should never fail the scan itself.
     """
     if not org.notification_webhook_url:
+        return False
+
+    try:
+        _validate_webhook_url(org.notification_webhook_url, org.id)
+    except ValueError as e:
+        logger.warning(f"Refusing to send webhook for org {org.id}: {e}")
         return False
 
     high_or_critical = severity_counts.get("high", 0) + severity_counts.get("critical", 0)

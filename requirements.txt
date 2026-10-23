@@ -39,3 +39,4 @@ kombu>=5.3.0
 
 # Stripe
 stripe>=8.0.0
+email-validator>=2.0

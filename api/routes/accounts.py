@@ -8,12 +8,13 @@ DELETE /accounts/{id}           Remove an account
 POST /accounts/{id}/verify      Test role assumption (validates setup)
 GET  /accounts/{id}/setup-guide Return IAM role setup instructions for this account
 """
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import Optional
 
+from core.audit import audit_log
 from core.auth import CurrentUser, get_current_user, require_min_role, require_role
 from core.aws_session import (
     generate_external_id, validate_role_arn, get_session_for_account, CG_AWS_ACCOUNT_ID,
@@ -22,6 +23,7 @@ from db.engine import get_db
 from db.models.aws_account import AWSAccount, AccountStatus
 from infra.cloudformation import generate_onboarding_template
 
+import asyncio
 import logging
 logger = logging.getLogger("cloud_guardian.api.accounts")
 
@@ -32,15 +34,25 @@ class ConnectAccountRequest(BaseModel):
     aws_account_id: str = Field(..., min_length=12, max_length=12,
                                  pattern=r"^\d{12}$", description="12-digit AWS account ID")
     display_name: str = Field(..., min_length=1, max_length=255)
-    role_arn: str = Field(..., description="ARN of the IAM role Cloud Guardian should assume")
-    primary_region: str = Field(default="us-east-1")
-    additional_regions: Optional[list[str]] = Field(default=None)
+    role_arn: str = Field(..., pattern=r"^arn:aws:iam::\d{12}:role/[A-Za-z0-9+=,.@_-]{1,128}$",
+                          description="ARN of the read-only detection role Cloud Guardian should assume")
+    auto_remediation_role_arn: Optional[str] = Field(default=None,
+        pattern=r"^arn:aws:iam::\d{12}:role/[A-Za-z0-9+=,.@_-]{1,128}$",
+        description="Low-risk auto-remediation role; must not grant destructive permissions")
+    destructive_remediation_role_arn: Optional[str] = Field(default=None,
+        pattern=r"^arn:aws:iam::\d{12}:role/[A-Za-z0-9+=,.@_-]{1,128}$",
+        description="Destructive remediation role; used only for explicitly approved actions")
+    primary_region: str = Field(default="us-east-1", pattern=r"^[a-z]{2}(-gov)?-[a-z]+-\d{1}$")
+    additional_regions: Optional[list[str]] = Field(default=None,
+        description="Extra regions; each must be a valid AWS region name")
 
 class AccountResponse(BaseModel):
     id: str
     aws_account_id: str
     display_name: str
     role_arn: str
+    auto_remediation_role_arn: Optional[str] = None
+    destructive_remediation_role_arn: Optional[str] = None
     primary_region: str
     additional_regions: Optional[list[str]]
     status: str
@@ -72,6 +84,8 @@ def _to_response(account: AWSAccount) -> AccountResponse:
     return AccountResponse(
         id=account.id, aws_account_id=account.aws_account_id,
         display_name=account.display_name, role_arn=account.role_arn,
+        auto_remediation_role_arn=account.auto_remediation_role_arn,
+        destructive_remediation_role_arn=account.destructive_remediation_role_arn,
         primary_region=account.primary_region,
         additional_regions=account.additional_regions,
         status=account.status,
@@ -163,6 +177,7 @@ async def get_cloudformation_template(
 
 @router.post("", response_model=AccountResponse, status_code=201)
 async def connect_account(
+    request: Request,
     body: ConnectAccountRequest,
     current_user: CurrentUser = Depends(require_min_role("admin")),
     db: AsyncSession = Depends(get_db),
@@ -172,6 +187,9 @@ async def connect_account(
     Requires admin or owner role.
     Validates role ARN format; actual role assumption tested via POST /accounts/{id}/verify.
     """
+    if body.additional_regions and len(body.additional_regions) > 10:
+        raise HTTPException(status_code=422, detail="At most 10 additional regions")
+
     if not validate_role_arn(body.role_arn):
         raise HTTPException(status_code=422,
                             detail="Invalid role ARN format. Expected: arn:aws:iam::<account_id>:role/<name>")
@@ -209,6 +227,8 @@ async def connect_account(
         aws_account_id=body.aws_account_id,
         display_name=body.display_name,
         role_arn=body.role_arn,
+        auto_remediation_role_arn=body.auto_remediation_role_arn,
+        destructive_remediation_role_arn=body.destructive_remediation_role_arn,
         external_id=external_id,
         primary_region=body.primary_region,
         additional_regions=body.additional_regions,
@@ -219,6 +239,11 @@ async def connect_account(
     await db.commit()
 
     logger.info(f"Account connected: {body.aws_account_id} for org {current_user.organization_id}")
+    await audit_log(db, organization_id=current_user.organization_id, user_id=current_user.id,
+        action="account.connected", resource_type="aws_account", resource_id=str(account.id),
+        detail=f"aws_account_id={body.aws_account_id} role={body.role_arn}",
+        ip_address=request.client.host if request.client else None,
+        user_agent=(request.headers.get("user-agent") or "")[:255], commit=True)
     return _to_response(account)
 
 
@@ -272,7 +297,8 @@ async def verify_account(
     if not account:
         raise HTTPException(status_code=404, detail="Account not found")
 
-    try:
+    def _verify_sync():
+        """Synchronous AWS checks — run via to_thread so the event loop is not blocked."""
         session = get_session_for_account(
             role_arn=account.role_arn,
             external_id=account.external_id,
@@ -283,21 +309,32 @@ async def verify_account(
         sts = session.client("sts")
         identity = sts.get_caller_identity()
 
-
         ct = session.client("cloudtrail", region_name=account.primary_region)
         ct.lookup_events(MaxResults=1)
-        account.cloudtrail_enabled = True
 
-
+        guardduty_enabled = False
         try:
             gd = session.client("guardduty", region_name=account.primary_region)
             detectors = gd.list_detectors().get("DetectorIds", [])
-            account.guardduty_enabled = len(detectors) > 0
+            guardduty_enabled = len(detectors) > 0
         except Exception:
-            account.guardduty_enabled = False
+            guardduty_enabled = False
+        return {
+            "guardduty_enabled": guardduty_enabled,
+            "aws_account_id": identity.get("Account"),
+            "assumed_arn": identity.get("Arn"),
+        }
 
+    try:
+        verify_result = await asyncio.to_thread(_verify_sync)
+        account.cloudtrail_enabled = True
+        account.guardduty_enabled = verify_result["guardduty_enabled"]
         account.status = AccountStatus.active
         account.last_error = None
+        identity = {
+            "Account": verify_result["aws_account_id"],
+            "Arn": verify_result["assumed_arn"],
+        }
         await db.commit()
 
         # Kick off the first scan automatically now that the role is live.

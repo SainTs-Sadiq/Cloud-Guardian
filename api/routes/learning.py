@@ -94,10 +94,11 @@ class SummaryOut(BaseModel):
     average_trust_score: float
 
 class ApproveGraduationRequest(BaseModel):
-    notes: Optional[str] = Field(None, description="Analyst notes on why this playbook is approved")
+    confirmed: bool = Field(..., description="Must be true — deliberate safety gate before autonomous execution")
+    notes: Optional[str] = Field(None, max_length=2000, description="Analyst notes on why this playbook is approved")
 
 class DisableRequest(BaseModel):
-    reason: str = Field(..., description="Why this playbook is being disabled")
+    reason: str = Field(..., min_length=3, max_length=2000, description="Why this playbook is being disabled")
 
 class LearningSettingsOut(BaseModel):
     learning_threshold: int
@@ -263,6 +264,10 @@ async def approve_graduation(
     Only playbooks in 'pending_graduation' are eligible.
     Requires admin or owner role.
     """
+    if not body.confirmed:
+        raise HTTPException(status_code=400,
+            detail="Set confirmed=true to approve. This is a deliberate safety gate before autonomous execution.")
+
     repo   = PlaybookMemoryRepository(db)
     memory = await repo.get_by_id(memory_id, current_user.organization_id)
     if not memory:
@@ -302,6 +307,12 @@ async def disable_playbook(
     if not memory:
         raise HTTPException(status_code=404, detail="Learned playbook not found")
     await db.commit()
+
+    await audit_log(db, organization_id=current_user.organization_id, user_id=current_user.id,
+        action="learning.playbook_disabled", resource_type="playbook_memory", resource_id=memory_id,
+        detail=(body.reason or "")[:2000],
+        ip_address=request.client.host if request.client else None,
+        user_agent=(request.headers.get("user-agent") or "")[:255], commit=True)
     return _memory_out(memory)
 
 

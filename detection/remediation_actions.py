@@ -8,10 +8,58 @@ from config.settings import AWS
 
 logger = logging.getLogger("cloud_guardian.remediation_actions")
 
+# Two session slots: low-risk auto actions and destructive (human-approved)
+# actions each use their own customer role. An auto-tier action can never
+# reach destructive permissions because its role simply doesn't have them.
+_auto_session = None
+_destructive_session = None
+
+def set_action_session(session, destructive=False):
+    """Inject the customer's assumed-role session so actions run with the
+    customer's credentials, never the platform's default chain."""
+    global _auto_session, _destructive_session
+    if destructive:
+        _destructive_session = session
+    else:
+        _auto_session = session
+
+def clear_action_session(destructive=None):
+    global _auto_session, _destructive_session
+    if destructive is None:
+        _auto_session = _destructive_session = None
+    elif destructive:
+        _destructive_session = None
+    else:
+        _auto_session = None
+
+# Actions that exceed the auto-approval tier regardless of playbook metadata
+# Destructive handlers: _client() refuses to serve them without the
+# human-approved (destructive) role session.
+DESTRUCTIVE_ACTIONS = {
+    "disable_access_key", "detach_dangerous_policy", "isolate_ec2_instance",
+    "disable_lambda_function", "restore_cloudtrail_logging", "revoke_session_token",
+}
+
 def _client(service, region=None):
-    kwargs = {}
-    if AWS.profile: kwargs["profile_name"] = AWS.profile
-    return boto3.Session(**kwargs).client(service, region_name=region or AWS.region)
+    # destructive-capable calls require the destructive (human-approved) role
+    import inspect
+    handler_name = inspect.currentframe().f_back.f_code.co_name
+    if handler_name in DESTRUCTIVE_ACTIONS:
+        session = _destructive_session
+        if session is None:
+            raise RuntimeError(
+                f"'{handler_name}' is a destructive action and requires the "
+                "human-approved remediation role (destructive session not set)."
+            )
+    else:
+        session = _auto_session or _destructive_session
+    if session is not None:
+        return session.client(service, region_name=region or AWS.region)
+    raise RuntimeError(
+        "No customer AWS session configured for remediation. "
+        "Call set_action_session(get_session_for_account(...)) before executing actions; "
+        "falling back to the platform's default credential chain is not allowed."
+    )
 
 def _username_from_arn(arn):
     if not arn or ":user/" not in arn: return None

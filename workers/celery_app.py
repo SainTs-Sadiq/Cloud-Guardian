@@ -37,6 +37,9 @@ app.conf.update(
     enable_utc=True,
 
 
+    task_time_limit=1800,          # hard kill after 30 min
+    task_soft_time_limit=1500,     # workers get 25 min to clean up
+
     task_acks_late=True,
     task_reject_on_worker_lost=True,
     worker_prefetch_multiplier=1,

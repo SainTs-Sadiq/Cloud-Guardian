@@ -5,7 +5,11 @@ import {
   PieChart, Pie, Cell,
 } from "recharts";
 
-const API_BASE = (typeof window !== "undefined" && window.CG_API_URL) || "http://localhost:8000";
+// Deployment-configurable: runtime override (window.CG_API_URL) wins,
+// then build-time VITE_API_URL, then localhost for dev.
+const API_BASE = (typeof window !== "undefined" && window.CG_API_URL)
+  || (import.meta.env && import.meta.env.VITE_API_URL)
+  || "http://localhost:8000";
 const POLL_INTERVAL_MS = 30_000;
 
 const C = {
@@ -2551,7 +2555,7 @@ function LearningPage({ authHeaders }) {
       const r = await fetch(`${API_BASE}/learning/playbooks/${memoryId}/approve`, {
         method:"POST",
         headers:{...authHeaders,"Content-Type":"application/json"},
-        body:JSON.stringify({ notes:null }),
+        body:JSON.stringify({ confirmed:true, notes:null }),
       });
       if (!r.ok) throw new Error((await r.json()).detail || "Approval failed");
       setMsg("✓ Playbook approved — autonomous execution enabled.");

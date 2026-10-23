@@ -16,6 +16,7 @@ from jose import JWTError
 from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from core.audit import audit_log
 from core.security import (
     create_access_token, create_refresh_token, decode_token,
     generate_api_key, hash_password, validate_password_strength, verify_password,
@@ -102,6 +103,9 @@ async def register(body: RegisterRequest, db: AsyncSession = Depends(get_db)):
     )
 
     logger.info(f"New org registered: {org.slug} (owner: {user.email})")
+    await audit_log(db, organization_id=org.id, user_id=user.id,
+        action="auth.register", resource_type="organization", resource_id=org.id,
+        detail=f"org slug={org.slug}", commit=True)
 
     return TokenResponse(
         access_token=create_access_token(user.id, org.id, user.role),
@@ -110,11 +114,16 @@ async def register(body: RegisterRequest, db: AsyncSession = Depends(get_db)):
 
 
 @router.post("/login", response_model=TokenResponse)
-async def login(body: LoginRequest, db: AsyncSession = Depends(get_db)):
+async def login(body: LoginRequest, request: Request, db: AsyncSession = Depends(get_db)):
     user_repo = UserRepository(db)
     user = await user_repo.get_by_email(body.email)
 
     if not user or not verify_password(body.password, user.hashed_password):
+        if user:  # correct email, wrong password — worth an audit row
+            await audit_log(db, organization_id=user.organization_id, user_id=user.id,
+                action="auth.login_failed", resource_type="user", resource_id=user.id,
+                detail="Incorrect password", ip_address=request.client.host if request.client else None,
+                user_agent=request.headers.get("user-agent"), commit=True)
         raise HTTPException(
             status_code=401,
             detail="Incorrect email or password",
@@ -124,6 +133,10 @@ async def login(body: LoginRequest, db: AsyncSession = Depends(get_db)):
         raise HTTPException(status_code=403, detail="Account is deactivated")
 
     await user_repo.update_last_login(user.id)
+    await audit_log(db, organization_id=user.organization_id, user_id=user.id,
+        action="auth.login", resource_type="user", resource_id=user.id,
+        ip_address=request.client.host if request.client else None,
+        user_agent=request.headers.get("user-agent"), commit=True)
 
     return TokenResponse(
         access_token=create_access_token(user.id, user.organization_id, user.role),

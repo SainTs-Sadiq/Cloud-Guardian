@@ -1,0 +1,25 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "AutoRemediationLowRisk",
+      "Effect": "Allow",
+      "Action": [
+        "s3:PutBucketAcl",
+        "s3:PutBucketPolicy",
+        "s3:PutPublicAccessBlock",
+        "ec2:RevokeSecurityGroupIngress",
+        "ec2:RevokeSecurityGroupEgress"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "Notifications",
+      "Effect": "Allow",
+      "Action": [
+        "sns:Publish"
+      ],
+      "Resource": "*"
+    }
+  ]
+}

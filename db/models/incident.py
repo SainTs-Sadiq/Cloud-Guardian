@@ -13,7 +13,7 @@ import uuid
 from datetime import datetime, timezone
 from enum import Enum as PyEnum
 
-from sqlalchemy import DateTime, Enum, ForeignKey, Integer, JSON, String, Text
+from sqlalchemy import UniqueConstraint, DateTime, Enum, ForeignKey, Integer, JSON, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from db.engine import Base
@@ -64,6 +64,10 @@ class Incident(Base):
 
 
     event_id: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    # Dedup guard: the same cloud event must not become two incidents in one org
+    __table_args__ = (
+        UniqueConstraint("organization_id", "event_id", name="uq_incident_org_event"),
+    )
     source: Mapped[str] = mapped_column(String(50), nullable=False)
     event_name: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
     event_time: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)

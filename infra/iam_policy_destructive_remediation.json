@@ -1,0 +1,28 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "HumanApprovedRemediationOnly",
+      "Effect": "Allow",
+      "Action": [
+        "iam:UpdateAccessKey",
+        "iam:DeleteAccessKey",
+        "iam:DetachUserPolicy",
+        "iam:DetachRolePolicy",
+        "iam:PutUserPolicy",
+        "iam:DeleteUserPolicy",
+        "iam:DeleteLoginProfile",
+        "ec2:TerminateInstances",
+        "ec2:StopInstances",
+        "ec2:CreateSecurityGroup",
+        "ec2:DescribeSecurityGroups",
+        "ec2:ModifyInstanceAttribute",
+        "ecs:UpdateService",
+        "ecs:StopTask",
+        "lambda:PutFunctionConcurrency",
+        "cloudtrail:StartLogging"
+      ],
+      "Resource": "*"
+    }
+  ]
+}

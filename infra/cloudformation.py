@@ -12,6 +12,7 @@ We generate JSON (not YAML) so no extra dependency (PyYAML) is needed —
 CloudFormation accepts JSON templates natively.
 """
 import json
+import pathlib
 from pathlib import Path
 
 _DETECTION_POLICY_PATH = Path(__file__).parent / "iam_policy_detection_readonly.json"
@@ -20,6 +21,12 @@ _DETECTION_POLICY_PATH = Path(__file__).parent / "iam_policy_detection_readonly.
 def _load_detection_policy() -> dict:
     return json.loads(_DETECTION_POLICY_PATH.read_text())
 
+
+def _load_split_remediation_policies() -> tuple[dict, dict]:
+    here = pathlib.Path(__file__).parent
+    auto = json.loads((here / "iam_policy_auto_remediation.json").read_text())
+    destr = json.loads((here / "iam_policy_destructive_remediation.json").read_text())
+    return auto, destr
 
 def generate_onboarding_template(
     cg_account_id: str,
@@ -40,6 +47,14 @@ def generate_onboarding_template(
                        /accounts.
     """
     detection_policy = _load_detection_policy()
+
+    # If CG detection service runs under a specific IAM role, restrict trust
+    # to that principal ARN instead of the whole account (any principal in
+    # the CG account could otherwise assume customer roles with the ext ID).
+    import os as _os
+    _exact = _os.environ.get("CG_IAM_ROLE_ARN", "").strip()
+    principal_arn_glob = _exact or f"arn:aws:iam::{cg_account_id}:root"
+    auto_policy, destructive_policy = _load_split_remediation_policies()
 
     return {
         "AWSTemplateFormatVersion": "2010-09-09",
@@ -65,7 +80,10 @@ def generate_onboarding_template(
                                 "Principal": {"AWS": f"arn:aws:iam::{cg_account_id}:root"},
                                 "Action": "sts:AssumeRole",
                                 "Condition": {
-                                    "StringEquals": {"sts:ExternalId": external_id}
+                                    "StringEquals": {"sts:ExternalId": external_id},
+                                    # Restrict to the exact principal that should assume this
+                                    # role, not the whole account root (defense in depth).
+                                    "ArnLike": {"aws:PrincipalArn": principal_arn_glob}
                                 },
                             }
                         ],
@@ -81,12 +99,70 @@ def generate_onboarding_template(
                         {"Key": "Purpose", "Value": "SecurityScanning"},
                     ],
                 },
-            }
+            },
+            "CloudGuardianAutoRemediationRole": {
+                "Type": "AWS::IAM::Role",
+                "Properties": {
+                    "RoleName": f"{role_name}AutoRemediation",
+                    "Description": "Low-risk auto-remediation role. Cannot perform destructive actions.",
+                    "MaxSessionDuration": 3600,
+                    "AssumeRolePolicyDocument": {
+                        "Version": "2012-10-17",
+                        "Statement": [{
+                            "Effect": "Allow",
+                            "Principal": {"AWS": f"arn:aws:iam::{cg_account_id}:root"},
+                            "Action": "sts:AssumeRole",
+                            "Condition": {
+                                "StringEquals": {"sts:ExternalId": external_id},
+                                "ArnLike": {"aws:PrincipalArn": principal_arn_glob},
+                            },
+                        }],
+                    },
+                    "Policies": [{
+                        "PolicyName": "CloudGuardianAutoRemediation",
+                        "PolicyDocument": auto_policy,
+                    }],
+                    "Tags": [{"Key": "ManagedBy", "Value": "CloudGuardian"}],
+                },
+            },
+            "CloudGuardianDestructiveRemediationRole": {
+                "Type": "AWS::IAM::Role",
+                "Properties": {
+                    "RoleName": f"{role_name}DestructiveRemediation",
+                    "Description": "Destructive remediation role — only used after explicit human approval per incident.",
+                    "MaxSessionDuration": 3600,
+                    "AssumeRolePolicyDocument": {
+                        "Version": "2012-10-17",
+                        "Statement": [{
+                            "Effect": "Allow",
+                            "Principal": {"AWS": f"arn:aws:iam::{cg_account_id}:root"},
+                            "Action": "sts:AssumeRole",
+                            "Condition": {
+                                "StringEquals": {"sts:ExternalId": external_id},
+                                "ArnLike": {"aws:PrincipalArn": principal_arn_glob},
+                            },
+                        }],
+                    },
+                    "Policies": [{
+                        "PolicyName": "CloudGuardianDestructiveRemediation",
+                        "PolicyDocument": destructive_policy,
+                    }],
+                    "Tags": [{"Key": "ManagedBy", "Value": "CloudGuardian"}],
+                },
+            },
         },
         "Outputs": {
             "RoleArn": {
                 "Description": "Copy this value into the Cloud Guardian onboarding wizard",
                 "Value": {"Fn::GetAtt": ["CloudGuardianDetectionRole", "Arn"]},
+            },
+            "AutoRemediationRoleArn": {
+                "Description": "Low-risk auto-remediation role (used by Celery auto-actions)",
+                "Value": {"Fn::GetAtt": ["CloudGuardianAutoRemediationRole", "Arn"]},
+            },
+            "DestructiveRemediationRoleArn": {
+                "Description": "Destructive remediation role (used only after human approval)",
+                "Value": {"Fn::GetAtt": ["CloudGuardianDestructiveRemediationRole", "Arn"]},
             },
             "ExternalId": {
                 "Description": "External ID used for this role (for reference only)",

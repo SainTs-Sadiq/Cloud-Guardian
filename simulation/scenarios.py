@@ -23,7 +23,8 @@ SCENARIOS = [
         "description": "Synthetic defense-evasion event; CloudTrail is not modified.",
         "event_name": "StopLogging",
         "expected_detection": True,
-        "expected_technique_id": "T1562.008",
+        # T1562.008 was revoked upstream by MITRE, replaced by T1685.002
+        "expected_technique_id": "T1685.002",
         "expected_tactic": "Defense Evasion",
         "risk": "critical",
         "raw": {"eventSource": "cloudtrail.amazonaws.com", "requestParameters": {"name": "simulation-trail"}},

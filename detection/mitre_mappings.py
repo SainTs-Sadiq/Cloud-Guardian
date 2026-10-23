@@ -44,11 +44,13 @@ EVENT_TECHNIQUE_MAP = {
     "AttachUserPolicy": TechniqueMapping("T1098.003","Account Manipulation: Additional Cloud Roles",Tactic.PRIVILEGE_ESCALATION,50,RiskTier.HIGH,"Managed policy attached to user - check for priv escalation"),
     "AttachRolePolicy": TechniqueMapping("T1098.003","Account Manipulation: Additional Cloud Roles",Tactic.PRIVILEGE_ESCALATION,50,RiskTier.HIGH,"Managed policy attached to role - check for priv escalation"),
     "PutUserPolicy": TechniqueMapping("T1098.003","Account Manipulation: Additional Cloud Roles",Tactic.PRIVILEGE_ESCALATION,50,RiskTier.HIGH,"Inline policy attached to user - direct privilege grant"),
-    "StopLogging": TechniqueMapping("T1562.008","Impair Defenses: Disable Cloud Logs",Tactic.DEFENSE_EVASION,80,RiskTier.CRITICAL,"CloudTrail logging stopped - classic attacker move"),
-    "DeleteTrail": TechniqueMapping("T1562.008","Impair Defenses: Disable Cloud Logs",Tactic.DEFENSE_EVASION,85,RiskTier.CRITICAL,"CloudTrail trail deleted - destruction of audit evidence"),
-    "DeleteFlowLogs": TechniqueMapping("T1562.008","Impair Defenses: Disable Cloud Logs",Tactic.DEFENSE_EVASION,70,RiskTier.CRITICAL,"VPC Flow Logs deleted"),
-    "UpdateDetector": TechniqueMapping("T1562.001","Impair Defenses: Disable or Modify Tools",Tactic.DEFENSE_EVASION,75,RiskTier.CRITICAL,"GuardDuty detector modified"),
-    "DeleteDetector": TechniqueMapping("T1562.001","Impair Defenses: Disable or Modify Tools",Tactic.DEFENSE_EVASION,85,RiskTier.CRITICAL,"GuardDuty detector deleted"),
+    # T1562.008 was revoked by MITRE and replaced by T1685.002 (Disable Cloud Logs)
+    "StopLogging": TechniqueMapping("T1685.002","Disable Cloud Logs",Tactic.DEFENSE_EVASION,80,RiskTier.CRITICAL,"CloudTrail logging stopped - classic attacker move"),
+    "DeleteTrail": TechniqueMapping("T1685.002","Disable Cloud Logs",Tactic.DEFENSE_EVASION,85,RiskTier.CRITICAL,"CloudTrail trail deleted - destruction of audit evidence"),
+    "DeleteFlowLogs": TechniqueMapping("T1685.002","Disable Cloud Logs",Tactic.DEFENSE_EVASION,70,RiskTier.CRITICAL,"VPC Flow Logs deleted"),
+    # T1562.001 was revoked and replaced by T1685 (Disable or Modify Tools)
+    "UpdateDetector": TechniqueMapping("T1685","Disable or Modify Tools",Tactic.DEFENSE_EVASION,75,RiskTier.CRITICAL,"GuardDuty detector modified"),
+    "DeleteDetector": TechniqueMapping("T1685","Disable or Modify Tools",Tactic.DEFENSE_EVASION,85,RiskTier.CRITICAL,"GuardDuty detector deleted"),
     "GetSecretValue": TechniqueMapping("T1552.001","Unsecured Credentials: Credentials in Files",Tactic.CREDENTIAL_ACCESS,35,RiskTier.MEDIUM,"Secrets Manager secret accessed"),
     "GetParameter": TechniqueMapping("T1552.001","Unsecured Credentials: Credentials in Files",Tactic.CREDENTIAL_ACCESS,20,RiskTier.LOW,"SSM parameter accessed"),
     "GetCallerIdentity": TechniqueMapping("T1078","Valid Accounts",Tactic.DISCOVERY,10,RiskTier.LOW,"Identity check - common first step after credential theft"),
@@ -66,6 +68,38 @@ EVENT_TECHNIQUE_MAP = {
     "DeleteBucket": TechniqueMapping("T1485","Data Destruction",Tactic.IMPACT,70,RiskTier.CRITICAL,"S3 bucket deleted"),
     "DeleteDBInstance": TechniqueMapping("T1485","Data Destruction",Tactic.IMPACT,75,RiskTier.CRITICAL,"RDS instance deleted"),
     "TerminateInstances": TechniqueMapping("T1561","Disk Wipe",Tactic.IMPACT,50,RiskTier.HIGH,"EC2 instance(s) terminated"),
+
+    # ---- Tier-1 expansion (2026-10-22, validated against MITRE ATT&CK enterprise-attack.json) ----
+    # Persistence / credential theft
+    "UpdateAccessKey": TechniqueMapping("T1098.001","Account Manipulation: Additional Cloud Credentials",Tactic.PERSISTENCE,40,RiskTier.HIGH,"Access key state changed - possible key re-enable"),
+    "PutManagedPolicy": TechniqueMapping("T1098.003","Account Manipulation: Additional Cloud Roles",Tactic.PRIVILEGE_ESCALATION,50,RiskTier.HIGH,"Managed policy created - review permissions scope"),
+    "CreateRole": TechniqueMapping("T1136.003","Create Account: Cloud Account",Tactic.PERSISTENCE,35,RiskTier.MEDIUM,"New IAM role created - check trust policy for external accounts"),
+    "AddUserToGroup": TechniqueMapping("T1098","Account Manipulation",Tactic.PERSISTENCE,35,RiskTier.MEDIUM,"IAM user added to group - possible privilege grant"),
+    "PutGroupPolicy": TechniqueMapping("T1098.003","Account Manipulation: Additional Cloud Roles",Tactic.PRIVILEGE_ESCALATION,45,RiskTier.HIGH,"Inline policy attached to group"),
+    # Steal / reuse auth material
+    "GetFederationToken": TechniqueMapping("T1552.001","Unsecured Credentials: Credentials in Files",Tactic.CREDENTIAL_ACCESS,40,RiskTier.MEDIUM,"Federated token issued - temporary credential minting"),
+    "UpdateSAMLProvider": TechniqueMapping("T1556.009","Modify Authentication Process: SAML-related",Tactic.CREDENTIAL_ACCESS,70,RiskTier.CRITICAL,"SAML provider modified - identity-federation backdoor"),
+    "CreateSAMLProvider": TechniqueMapping("T1556.009","Modify Authentication Process: SAML-related",Tactic.CREDENTIAL_ACCESS,65,RiskTier.CRITICAL,"New SAML provider created - possible rogue federation"),
+    # Inhibit recovery / impact
+    "DeleteDBCluster": TechniqueMapping("T1485","Data Destruction",Tactic.IMPACT,80,RiskTier.CRITICAL,"RDS cluster deleted"),
+    "DeleteDBSnapshot": TechniqueMapping("T1490","Inhibit System Recovery",Tactic.DEFENSE_EVASION,75,RiskTier.CRITICAL,"DB snapshot deleted - destroying recovery points"),
+    "DeregisterImage": TechniqueMapping("T1490","Inhibit System Recovery",Tactic.DEFENSE_EVASION,60,RiskTier.HIGH,"AMI deregistered - destroying recovery images"),
+    "DeleteSnapshot": TechniqueMapping("T1490","Inhibit System Recovery",Tactic.DEFENSE_EVASION,65,RiskTier.HIGH,"EBS snapshot deleted - destroying recovery points"),
+    "PutBucketLifecycleConfiguration": TechniqueMapping("T1490","Inhibit System Recovery",Tactic.DEFENSE_EVASION,45,RiskTier.MEDIUM,"Bucket lifecycle rule changed - could expire backups/logs"),
+    # Execution / lateral movement
+    "SendCommand": TechniqueMapping("T1651","Cloud Application Discovery",Tactic.EXECUTION,45,RiskTier.MEDIUM,"SSM command sent to instances - remote execution channel"),
+    "AuthorizeSecurityGroupIngress": TechniqueMapping("T1578.005","Modify Cloud Compute Infrastructure",Tactic.DEFENSE_EVASION,55,RiskTier.HIGH,"Security group ingress opened - possible firewall weakening"),
+    "RevokeSecurityGroupIngress": TechniqueMapping("T1578","Modify Cloud Compute Infrastructure",Tactic.DEFENSE_EVASION,25,RiskTier.LOW,"Security group ingress rule removed"),
+    "ModifyInstanceAttribute": TechniqueMapping("T1578","Modify Cloud Compute Infrastructure",Tactic.LATERAL_MOVEMENT,40,RiskTier.MEDIUM,"EC2 instance attributes modified - e.g. userData injection"),
+    # Exfiltration
+    "PutBucketReplication": TechniqueMapping("T1537","Transfer Data to Cloud Account",Tactic.EXFILTRATION,60,RiskTier.HIGH,"Bucket replication configured - possible silent exfil to another account"),
+    "CreateTrail": TechniqueMapping("T1685.002","Disable Cloud Logs",Tactic.DEFENSE_EVASION,40,RiskTier.MEDIUM,"New CloudTrail trail - attacker may redirect or duplicate logging"),
+    "DeleteLogStream": TechniqueMapping("T1685.002","Disable Cloud Logs",Tactic.DEFENSE_EVASION,60,RiskTier.HIGH,"CloudWatch log stream deleted - log tampering"),
+    "PutLogProfile": TechniqueMapping("T1685.002","Disable Cloud Logs",Tactic.DEFENSE_EVASION,50,RiskTier.HIGH,"Log profile modified"),
+    "UpdateTrail": TechniqueMapping("T1685.002","Disable Cloud Logs",Tactic.DEFENSE_EVASION,70,RiskTier.CRITICAL,"Trail reconfigured - logging may point to attacker-controlled sink"),
+    "PutBucketNotification": TechniqueMapping("T1537","Transfer Data to Cloud Account",Tactic.EXFILTRATION,50,RiskTier.HIGH,"Bucket event notifications changed - possible data-stealing trigger"),
+    # Collection
+    "HeadObject": TechniqueMapping("T1530","Data from Cloud Storage",Tactic.COLLECTION,5,RiskTier.LOW,"S3 object metadata read"),
 }
 
 DANGEROUS_MANAGED_POLICIES = {
@@ -82,3 +116,17 @@ def all_tactics_summary():
     for m in EVENT_TECHNIQUE_MAP.values():
         summary[m.tactic.value] += 1
     return summary
+
+
+def validate_against_attack_catalog():
+    """Cross-check EVENT_TECHNIQUE_MAP against the vendored ATT&CK catalog.
+    Returns (unknown_ids, revoked_ids) — empty tuples mean we're in sync."""
+    from detection.attack_catalog import ATTACK_CLOUD_INDEX
+    unknown, revoked = set(), set()
+    for m in EVENT_TECHNIQUE_MAP.values():
+        entry = ATTACK_CLOUD_INDEX.get(m.technique_id)
+        if entry is None:
+            unknown.add(m.technique_id)
+        elif entry.revoked:
+            revoked.add(m.technique_id)
+    return sorted(unknown), sorted(revoked)

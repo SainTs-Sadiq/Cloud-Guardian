@@ -13,6 +13,8 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
+import os
+
 from api.routes import accounts, alerts, auth, billing, dashboard, health, learning, organizations, remediation, scan, simulator, users
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
@@ -58,10 +60,19 @@ app = FastAPI(
     redoc_url="/redoc",
 )
 
+_cors_origins = [
+    o.strip() for o in os.environ.get("CG_CORS_ORIGINS", "").split(",") if o.strip()
+]
+_cors_credentials = bool(_cors_origins)
+
+from core.rate_limit import RateLimitMiddleware
+
+app.add_middleware(RateLimitMiddleware)
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
+    allow_origins=_cors_origins,
+    allow_credentials=_cors_credentials,
     allow_methods=["*"],
     allow_headers=["*"],
 )

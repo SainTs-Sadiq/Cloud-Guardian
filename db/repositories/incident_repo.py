@@ -79,7 +79,17 @@ class IncidentRepository:
             .where(Incident.id == incident_id, Incident.organization_id == organization_id)
             .options(selectinload(Incident.remediations))
         )
-        return result.scalar_one_or_none()
+        incident = result.scalar_one_or_none()
+        if incident is None:
+            # Dashboard actions may pass the alert's event_id instead of the
+            # incident UUID — resolve it, still tenant-scoped.
+            result = await self.db.execute(
+                select(Incident)
+                .where(Incident.event_id == incident_id, Incident.organization_id == organization_id)
+                .options(selectinload(Incident.remediations))
+            )
+            incident = result.scalar_one_or_none()
+        return incident
 
     async def get_by_event_id(self, event_id: str, organization_id: str) -> Incident | None:
         result = await self.db.execute(

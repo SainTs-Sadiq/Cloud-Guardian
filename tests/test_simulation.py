@@ -25,7 +25,8 @@ def test_evaluator_confusion_matrix_and_metrics():
     assert report["metrics"]["recall_detection_rate"] == 0.5
     assert report["metrics"]["f1_score"] == 0.5
     assert report["metrics"]["accuracy"] == 0.5
-    assert report["metrics"]["mitre_mapping_accuracy"] == 1.0
+    # 2 scenarios expect a technique (T1 correct, T2 missed so actual is None) -> 1/2
+    assert report["metrics"]["mitre_mapping_accuracy"] == 0.5
     assert report["metrics"]["remediation_success_rate"] is None
 
 
