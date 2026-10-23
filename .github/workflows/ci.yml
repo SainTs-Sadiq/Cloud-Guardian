@@ -1,0 +1,59 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: pytest + ATT&CK catalog (py${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.13"]
+
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Validate ATT&CK mappings against catalog
+        run: |
+          python -c "
+          import sys
+          from detection.mitre_mappings import validate_against_attack_catalog
+          unknown, revoked = validate_against_attack_catalog()
+          if unknown or revoked:
+              print('unknown technique IDs:', sorted(unknown))
+              print('revoked technique IDs:', sorted(revoked))
+              sys.exit(1)
+          print('ATT&CK mapping catalog check passed')
+          "
+
+      - name: Run full pytest suite
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+          PYTHONUNBUFFERED: "1"
+        run: python -m pytest -q
