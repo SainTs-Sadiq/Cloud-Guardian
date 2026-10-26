@@ -43,13 +43,14 @@ jobs:
         run: |
           python -c "
           import sys
-          from detection.mitre_mappings import validate_against_attack_catalog
-          unknown, revoked = validate_against_attack_catalog()
-          if unknown or revoked:
-              print('unknown technique IDs:', sorted(unknown))
-              print('revoked technique IDs:', sorted(revoked))
+          from detection.mitre_mappings import validate_single_source
+          problems = validate_single_source()
+          bad = {k: v for k, v in problems.items() if v}
+          if bad:
+              for name, items in bad.items():
+                  print(name + ':', items)
               sys.exit(1)
-          print('ATT&CK mapping catalog check passed')
+          print('ATT&CK single-source check passed')
           "
 
       - name: Run full pytest suite

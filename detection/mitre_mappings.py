@@ -111,11 +111,40 @@ DANGEROUS_MANAGED_POLICIES = {
 def get_mapping(event_name):
     return EVENT_TECHNIQUE_MAP.get(event_name)
 
+def mapped_technique_ids():
+    """Distinct ATT&CK technique IDs used by EVENT_TECHNIQUE_MAP. Several event names
+    can map to one technique (e.g. 60 event rows -> 22 techniques), so this is the
+    number that means 'techniques covered'."""
+    return sorted({m.technique_id for m in EVENT_TECHNIQUE_MAP.values()})
+
+
 def all_tactics_summary():
+    """Distinct technique IDs per tactic, for every Tactic (zero if uncovered).
+    A technique listed under two tactics (e.g. T1078) counts once under each."""
+    pairs = {(m.tactic.value, m.technique_id) for m in EVENT_TECHNIQUE_MAP.values()}
     summary = {t.value: 0 for t in Tactic}
-    for m in EVENT_TECHNIQUE_MAP.values():
-        summary[m.tactic.value] += 1
+    for tactic, _technique in pairs:
+        summary[tactic] += 1
     return summary
+
+
+def uncovered_tactics():
+    """Tactics in the Tactic enum that no mapped event uses."""
+    return [tactic for tactic, count in all_tactics_summary().items() if count == 0]
+
+
+# Technique IDs that detectors hard-code OUTSIDE EVENT_TECHNIQUE_MAP (config_scanner,
+# guardduty_ingest, playbooks, rule_engine). They are kept as-is so detection output
+# does not change. Every entry must carry a reason; validate_single_source() fails on
+# any other detector-emitted ID that is unknown to the catalog or revoked, and on any
+# entry here that no longer appears in the code (stale).
+DETECTOR_ID_EXCEPTIONS = {
+    "T1562.008": "not in the vendored catalog. Mapping comments say MITRE revoked it and replaced it with T1685.002. Still emitted by config_scanner.py and guardduty_ingest.py. Changing it changes alert output, so it needs a decision.",
+    "T1562.001": "not in the vendored catalog. Mapping comments say it was replaced by T1685. Still emitted by config_scanner.py.",
+    "T1562":     "not in the vendored catalog (parent ID). Used as a key in rule_engine._infer_tactic.",
+    "T1071":     "not in the vendored catalog. Emitted for GuardDuty Backdoor:EC2 findings (guardduty_ingest.py).",
+    "T1561":     "not in the vendored catalog. playbooks.py key for instance termination.",
+}
 
 
 def validate_against_attack_catalog():
@@ -130,3 +159,45 @@ def validate_against_attack_catalog():
         elif entry.revoked:
             revoked.add(m.technique_id)
     return sorted(unknown), sorted(revoked)
+
+
+def detector_technique_literals():
+    """Map technique ID -> sorted list of 'file:line' where detection/*.py hard-codes it.
+    Scans source text, so it also sees IDs that are not in EVENT_TECHNIQUE_MAP."""
+    import re
+    from pathlib import Path
+    pattern = re.compile(r"\bT\d{4}(?:\.\d{3})?\b")
+    found = {}
+    root = Path(__file__).resolve().parent
+    for path in sorted(root.glob("*.py")):
+        if path.name == "attack_catalog.py":
+            continue  # the vendored reference list, not detector code
+        for lineno, line in enumerate(path.read_text().splitlines(), 1):
+            for tid in pattern.findall(line):
+                found.setdefault(tid, []).append(f"{path.name}:{lineno}")
+    return {k: sorted(set(v)) for k, v in found.items()}
+
+
+def validate_single_source():
+    """Full single-source check used by CI and tests. Returns a dict of problems;
+    all lists empty means the canonical map, catalog and detectors agree."""
+    from detection.attack_catalog import ATTACK_CLOUD_INDEX
+    unknown, revoked = validate_against_attack_catalog()
+    literals = detector_technique_literals()
+    unlisted_unknown, unlisted_revoked = [], []
+    for tid in sorted(literals):
+        if tid in DETECTOR_ID_EXCEPTIONS:
+            continue
+        entry = ATTACK_CLOUD_INDEX.get(tid)
+        if entry is None:
+            unlisted_unknown.append(f"{tid} at {', '.join(literals[tid])}")
+        elif entry.revoked:
+            unlisted_revoked.append(f"{tid} at {', '.join(literals[tid])}")
+    stale = sorted(t for t in DETECTOR_ID_EXCEPTIONS if t not in literals)
+    return {
+        "unknown_mapped": unknown,
+        "revoked_mapped": revoked,
+        "unlisted_unknown_detector_ids": unlisted_unknown,
+        "unlisted_revoked_detector_ids": unlisted_revoked,
+        "stale_exceptions": stale,
+    }

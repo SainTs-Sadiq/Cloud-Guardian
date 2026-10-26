@@ -13,7 +13,7 @@ from db.engine import get_db
 from db.repositories.incident_repo import IncidentRepository
 from detection.cloudtrail_ingest import check_credentials
 from detection.guardduty_ingest import list_active_detectors
-from detection.mitre_mappings import EVENT_TECHNIQUE_MAP, all_tactics_summary
+from detection.mitre_mappings import all_tactics_summary, mapped_technique_ids, uncovered_tactics
 from config.settings import AWS, REMEDIATION, STORAGE
 
 router = APIRouter(tags=["System"])
@@ -73,7 +73,10 @@ async def mitre_coverage(
     current_user: CurrentUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """MITRE ATT&CK coverage + active alert count by tactic — org-scoped."""
+    """MITRE ATT&CK coverage + active alert count by tactic — org-scoped.
+    Counts come from the canonical EVENT_TECHNIQUE_MAP: total_techniques_mapped is
+    the number of DISTINCT technique IDs (not event rows), and uncovered_tactics lists
+    every Tactic with no mapped technique so the UI can show gaps."""
     repo = IncidentRepository(db)
     tactic_counts = await repo.count_by_tactic(current_user.organization_id)
     tactic_technique_counts = all_tactics_summary()
@@ -92,7 +95,9 @@ async def mitre_coverage(
     total_active = sum(tactic_counts.values())
 
     return CoverageResponse(
-        total_techniques_mapped=len(EVENT_TECHNIQUE_MAP),
+        total_techniques_mapped=len(mapped_technique_ids()),
         tactics=tactics,
+        uncovered_tactics=uncovered_tactics(),
         active_alert_count=total_active,
     )
+

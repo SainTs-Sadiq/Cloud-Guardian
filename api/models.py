@@ -106,4 +106,5 @@ class TacticCoverage(BaseModel):
 class CoverageResponse(BaseModel):
     total_techniques_mapped: int
     tactics: list[TacticCoverage]
+    uncovered_tactics: list[str] = []
     active_alert_count: int

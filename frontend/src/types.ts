@@ -80,6 +80,7 @@ export interface TacticCoverage {
 export interface CoverageResponse {
   total_techniques_mapped: number;
   tactics: TacticCoverage[];
+  uncovered_tactics: string[];
   active_alert_count: number;
 }
 
