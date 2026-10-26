@@ -104,7 +104,6 @@ services:
   - type: web
     name: cloud-guardian-frontend
     runtime: static
-    region: oregon
     branch: main
     autoDeploy: true
     rootDir: frontend
@@ -127,6 +126,7 @@ services:
     plan: starter
     region: oregon
     maxmemoryPolicy: noeviction
+    ipAllowList: []
 
 databases:
   - name: cloud-guardian-db
