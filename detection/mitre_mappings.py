@@ -80,14 +80,18 @@ EVENT_TECHNIQUE_MAP = {
     "GetFederationToken": TechniqueMapping("T1552.001","Unsecured Credentials: Credentials in Files",Tactic.CREDENTIAL_ACCESS,40,RiskTier.MEDIUM,"Federated token issued - temporary credential minting"),
     "UpdateSAMLProvider": TechniqueMapping("T1556.009","Modify Authentication Process: SAML-related",Tactic.CREDENTIAL_ACCESS,70,RiskTier.CRITICAL,"SAML provider modified - identity-federation backdoor"),
     "CreateSAMLProvider": TechniqueMapping("T1556.009","Modify Authentication Process: SAML-related",Tactic.CREDENTIAL_ACCESS,65,RiskTier.CRITICAL,"New SAML provider created - possible rogue federation"),
+    # T1556.009 (Conditional Access Policies) is NOT what SAML provider create/update detects. Left unchanged:
+    # candidates are T1556.007 (Hybrid Identity, covers AD FS federation) or T1484.002 (Trust Modification). Needs a decision.
     # Inhibit recovery / impact
     "DeleteDBCluster": TechniqueMapping("T1485","Data Destruction",Tactic.IMPACT,80,RiskTier.CRITICAL,"RDS cluster deleted"),
     "DeleteDBSnapshot": TechniqueMapping("T1490","Inhibit System Recovery",Tactic.DEFENSE_EVASION,75,RiskTier.CRITICAL,"DB snapshot deleted - destroying recovery points"),
     "DeregisterImage": TechniqueMapping("T1490","Inhibit System Recovery",Tactic.DEFENSE_EVASION,60,RiskTier.HIGH,"AMI deregistered - destroying recovery images"),
     "DeleteSnapshot": TechniqueMapping("T1490","Inhibit System Recovery",Tactic.DEFENSE_EVASION,65,RiskTier.HIGH,"EBS snapshot deleted - destroying recovery points"),
     "PutBucketLifecycleConfiguration": TechniqueMapping("T1490","Inhibit System Recovery",Tactic.DEFENSE_EVASION,45,RiskTier.MEDIUM,"Bucket lifecycle rule changed - could expire backups/logs"),
+    # T1651 Cloud Administration Command: SSM SendCommand runs scripts in VMs via the VM agent (MITRE definition).
+    # Name was wrong ("Cloud Application Discovery"), ID was right.
     # Execution / lateral movement
-    "SendCommand": TechniqueMapping("T1651","Cloud Application Discovery",Tactic.EXECUTION,45,RiskTier.MEDIUM,"SSM command sent to instances - remote execution channel"),
+    "SendCommand": TechniqueMapping("T1651","Cloud Administration Command",Tactic.EXECUTION,45,RiskTier.MEDIUM,"SSM command sent to instances - remote execution channel"),
     "AuthorizeSecurityGroupIngress": TechniqueMapping("T1578.005","Modify Cloud Compute Infrastructure",Tactic.DEFENSE_EVASION,55,RiskTier.HIGH,"Security group ingress opened - possible firewall weakening"),
     "RevokeSecurityGroupIngress": TechniqueMapping("T1578","Modify Cloud Compute Infrastructure",Tactic.DEFENSE_EVASION,25,RiskTier.LOW,"Security group ingress rule removed"),
     "ModifyInstanceAttribute": TechniqueMapping("T1578","Modify Cloud Compute Infrastructure",Tactic.LATERAL_MOVEMENT,40,RiskTier.MEDIUM,"EC2 instance attributes modified - e.g. userData injection"),
@@ -139,7 +143,7 @@ def uncovered_tactics():
 # any other detector-emitted ID that is unknown to the catalog or revoked, and on any
 # entry here that no longer appears in the code (stale).
 DETECTOR_ID_EXCEPTIONS = {
-    "T1562.008": "not in the vendored catalog. Mapping comments say MITRE revoked it and replaced it with T1685.002. Still emitted by config_scanner.py and guardduty_ingest.py. Changing it changes alert output, so it needs a decision.",
+    "T1562.008": "not in the vendored catalog. Checked attack.mitre.org: the T1562.008 page exists with no revocation notice, so the claimed revocation/replacement by T1685.002 is NOT confirmed. Left unchanged. Still emitted by config_scanner.py and guardduty_ingest.py. Changing it changes alert output, so it needs a decision.",
     "T1562.001": "not in the vendored catalog. Mapping comments say it was replaced by T1685. Still emitted by config_scanner.py.",
     "T1562":     "not in the vendored catalog (parent ID). Used as a key in rule_engine._infer_tactic.",
     "T1071":     "not in the vendored catalog. Emitted for GuardDuty Backdoor:EC2 findings (guardduty_ingest.py).",

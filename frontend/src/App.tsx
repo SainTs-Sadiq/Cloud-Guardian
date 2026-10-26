@@ -210,7 +210,7 @@ function deriveSecScoreTrend(alerts: AlertListResponse | null) {
 
 function deriveCoverage(coverage: CoverageResponse | null) {
   const tactics = coverage?.tactics || [];
-  const total = coverage?.total_techniques_mapped || 35;
+  const total = Math.max(1, coverage?.total_techniques_mapped ?? 0);
   const mapped = tactics.reduce((s, t) => s + t.technique_count, 0);
   return [
     { name: "CIS AWS Foundations", pct: Math.min(100, Math.round((mapped / total) * 90) + 10), color: C.green },
@@ -851,6 +851,7 @@ function Dashboard({ onLogout }: { onLogout: () => void }) {
                   </div>
                   <div style={{ fontSize:28, fontWeight:700, lineHeight:1 }}>{coverage?.total_techniques_mapped ?? "—"}</div>
                   <div style={{ fontSize:11, color:C.green, marginTop:5 }}>+ 157 new this week</div>
+                  {coverage && coverage.uncovered_tactics.length > 0 && <div style={{ fontSize:10, color:C.yellow, marginTop:4 }}>uncovered: {coverage.uncovered_tactics.join(", ")}</div>}
                   <div style={{ height:36 }}/>
                 </div>
 
