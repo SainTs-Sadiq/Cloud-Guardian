@@ -4,6 +4,10 @@ Full functional tests are in test_auth_integration.py.
 
 These tests use the auth_client fixture and a real registered user.
 """
+
+from unittest.mock import patch
+
+from tests.test_auth_integration import auth_headers, register_and_login
 import pytest
 from fastapi.testclient import TestClient
 
@@ -33,16 +37,30 @@ class TestHealth:
         r = auth_client.get("/health")
         assert r.status_code == 200
 
-    def test_health_has_required_fields(self, auth_client):
+    def test_health_is_liveness_only(self, auth_client):
         data = auth_client.get("/health").json()
-        for field in ["status", "region", "guardduty_enabled", "cloudtrail_accessible",
+        assert data == {"status": "ok"}
+
+    def test_health_makes_no_aws_calls(self, auth_client):
+        with patch("api.routes.health.check_credentials") as cc, \
+             patch("api.routes.health.list_active_detectors") as ld:
+            assert auth_client.get("/health").status_code == 200
+        cc.assert_not_called()
+        ld.assert_not_called()
+
+    def test_health_deep_requires_auth(self, auth_client):
+        assert auth_client.get("/health/deep").status_code == 401
+
+    def test_health_deep_returns_detail_when_authenticated(self, auth_client):
+        tokens = register_and_login(auth_client, "deep-health", "deep@test.com")
+        with patch("api.routes.health.check_credentials", return_value={"ok": False}):
+            r = auth_client.get("/health/deep", headers=auth_headers(tokens))
+        assert r.status_code == 200
+        data = r.json()
+        assert data["status"] == "no_credentials"
+        for field in ["region", "guardduty_enabled", "cloudtrail_accessible",
                       "model_loaded", "remediation_enabled", "storage_backend"]:
             assert field in data, f"Missing: {field}"
-
-    def test_health_status_no_credentials(self, auth_client):
-        assert auth_client.get("/health").json()["status"] in (
-            "healthy", "degraded", "no_credentials"
-        )
 
 
 class TestAlerts:

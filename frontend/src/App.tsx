@@ -2,7 +2,8 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import type { ReactNode, CSSProperties } from "react";
 import type {
   AlertListResponse, AlertSummary, AlertDetail, RemediationResponse, ScanResponse,
-  ScanDispatchResponse, HealthResponse, CoverageResponse, TokenResponse, UserProfile,
+  ScanDispatchResponse, HealthResponse, DeepHealthResponse, CoverageResponse,
+  DashboardSummaryResponse, ComplianceResponse, RiskScoreResponse, TokenResponse, UserProfile,
   AccountResponse, SetupGuideResponse, CloudFormationTemplateResponse, SubscriptionResponse,
   AllPlansResponse, CheckoutResponse, PortalResponse, PlaybookMemory, LearningSummary,
   LearningSettings, PlanInfo, ApiError, ApiErrorBody, ApproveMessage,
@@ -128,7 +129,7 @@ function deriveStats(alerts: AlertListResponse | null, coverage: CoverageRespons
     secScore,
     activeThreats: active.length,
     criticalCount: critical.length,
-    connectedAccounts: health?.guardduty_enabled !== undefined ? "—" : "—",
+    connectedAccounts: "—",
     successRate,
     pending,
     remediated,
@@ -470,11 +471,55 @@ function Dashboard({ onLogout }: { onLogout: () => void }) {
   const [scanMsg, setScanMsg] = useState<ApproveMessage | null>(null);
   const [me, setMe] = useState<UserProfile | null>(null);
 
-  const { data: health, loading: healthLoading, refetch: refetchHealth } =
-    useApi("/health", [], { interval: POLL_INTERVAL_MS });
+  // /health is a cheap liveness check (no AWS calls). The AWS detail lives behind
+  // /health/deep (authenticated, billable), so it is only fetched while Settings is open.
+  const { data: health, loading: healthLoading } =
+    useApi<HealthResponse>("/health", [], { interval: POLL_INTERVAL_MS });
+  const { data: deepHealth, loading: deepHealthLoading } =
+    useApi<DeepHealthResponse>("/health/deep", [], { skip: activeNav !== "Settings" });
 
-  const { data: alerts, loading: alertsLoading, error: alertsError, refetch: refetchAlerts } =
-    useApi("/alerts?limit=500", [], { interval: POLL_INTERVAL_MS });
+  // Dashboard endpoints (router prefix /dashboard, see api/routes/dashboard.py).
+  const { data: dashSummary, loading: dashSummaryLoading } =
+    useApi<DashboardSummaryResponse>("/dashboard/summary", [], { interval: POLL_INTERVAL_MS });
+  const { data: compliance, loading: complianceLoading } =
+    useApi<ComplianceResponse>("/dashboard/compliance", [], { interval: POLL_INTERVAL_MS });
+  const { data: riskScore, loading: riskScoreLoading } =
+    useApi<RiskScoreResponse>("/dashboard/risk-score", [], { interval: POLL_INTERVAL_MS });
+
+  // Alerts are paged: first page on mount/poll, further pages appended by "Load more".
+  const ALERTS_PAGE_SIZE = 50;
+  const [extraAlerts, setExtraAlerts] = useState<AlertSummary[]>([]);
+  const [alertsTotal, setAlertsTotal] = useState<number | null>(null);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [loadMoreError, setLoadMoreError] = useState<string | null>(null);
+
+  const { data: alerts, loading: alertsLoading, error: alertsError, refetch: refetchAlertsPage } =
+    useApi<AlertListResponse>(`/alerts?limit=${ALERTS_PAGE_SIZE}&offset=0`, [], { interval: POLL_INTERVAL_MS });
+
+  // Re-fetching page one resets the appended pages so the list stays consistent.
+  const refetchAlerts = useCallback(() => {
+    setExtraAlerts([]);
+    setLoadMoreError(null);
+    refetchAlertsPage();
+  }, [refetchAlertsPage]);
+
+  useEffect(() => {
+    if (alerts) setAlertsTotal(alerts.total);
+  }, [alerts]);
+
+  async function loadMoreAlerts() {
+    setLoadingMore(true); setLoadMoreError(null);
+    try {
+      const offset = (alerts?.alerts.length ?? 0) + extraAlerts.length;
+      const page = await api<AlertListResponse>(`/alerts?limit=${ALERTS_PAGE_SIZE}&offset=${offset}`);
+      setExtraAlerts(prev => [...prev, ...page.alerts]);
+      setAlertsTotal(page.total);
+    } catch (e) {
+      setLoadMoreError((e as Error).message);
+    } finally {
+      setLoadingMore(false);
+    }
+  }
 
   const { data: coverage, loading: coverageLoading, refetch: refetchCoverage } =
     useApi("/coverage", [], { interval: POLL_INTERVAL_MS });
@@ -495,7 +540,8 @@ function Dashboard({ onLogout }: { onLogout: () => void }) {
   const scoreTrend = deriveSecScoreTrend(alerts);
   const complianceData = deriveCoverage(coverage);
 
-  const allAlerts = alerts?.alerts || [];
+  const allAlerts: AlertSummary[] = [...(alerts?.alerts || []), ...extraAlerts];
+  const hasMoreAlerts = alertsTotal !== null && allAlerts.length < alertsTotal;
   const recentAlerts = [...allAlerts]
     .sort((a, b) => new Date(b.event_time).getTime() - new Date(a.event_time).getTime())
     .slice(0, 5);
@@ -544,6 +590,7 @@ function Dashboard({ onLogout }: { onLogout: () => void }) {
   }
 
   const loading = alertsLoading || healthLoading;
+  const dashLoading = dashSummaryLoading || complianceLoading || riskScoreLoading;
 
   const tacticIcon = (t: string): string => ({
     "Initial Access": "IA", "Execution": "EX", "Persistence": "PE",
@@ -665,11 +712,9 @@ function Dashboard({ onLogout }: { onLogout: () => void }) {
             <div style={{ fontSize: 20, fontWeight: 700 }}>{activeNav}</div>
             <div style={{ fontSize: 12, color: C.muted, marginTop: 2 }}>
               {me ? `Welcome back, ${me.full_name}! ` : ""}
-              {health?.status === "healthy"
+              {health?.status === "ok"
                 ? "All systems operational."
-                : health?.status === "no_credentials"
-                  ? "AWS credentials not configured."
-                  : "Some services degraded."}
+                : "Some services degraded."}
             </div>
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
@@ -1104,6 +1149,45 @@ function Dashboard({ onLogout }: { onLogout: () => void }) {
                   </div>
                 </div>
               </div>
+
+              {/* ── Row 5: Risk score + Compliance (from /dashboard/risk-score and /dashboard/compliance) ── */}
+              <div style={{ display:"grid", gridTemplateColumns:"1fr 2fr", gap:16 }}>
+                <div style={{ background:C.card, border:`1px solid ${C.cardBorder}`, borderRadius:12, padding:"18px 20px" }}>
+                  <div style={{ fontSize:14, fontWeight:600, marginBottom:14 }}>Risk Score</div>
+                  {dashLoading && !riskScore ? (
+                    <div style={{ display:"flex", justifyContent:"center", padding:24 }}><Spinner size={20}/></div>
+                  ) : riskScore ? (
+                    <div>
+                      <div style={{ fontSize:32, fontWeight:700 }}>{riskScore.posture_score}<span style={{ fontSize:14, color:C.muted }}>/100</span></div>
+                      <div style={{ fontSize:12, color:C.muted, marginTop:4 }}>Grade {riskScore.grade} · {riskScore.risk_points} risk points</div>
+                    </div>
+                  ) : (
+                    <div style={{ fontSize:12, color:C.dim }}>Risk score unavailable.</div>
+                  )}
+                </div>
+                <div style={{ background:C.card, border:`1px solid ${C.cardBorder}`, borderRadius:12, padding:"18px 20px" }}>
+                  <div style={{ fontSize:14, fontWeight:600, marginBottom:14 }}>Compliance Status</div>
+                  {dashLoading && !compliance ? (
+                    <div style={{ display:"flex", justifyContent:"center", padding:24 }}><Spinner size={20}/></div>
+                  ) : compliance && compliance.by_service.length > 0 ? (
+                    <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
+                      {compliance.by_service.map(svc=>(
+                        <div key={svc.service} style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+                          <span style={{ fontSize:12, color:C.muted }}>{svc.service}</span>
+                          <span style={{ fontSize:12, fontWeight:600, color: svc.pass_rate >= 90 ? C.green : svc.pass_rate >= 70 ? C.yellow : C.red }}>
+                            {Math.round(svc.pass_rate)}% pass · {svc.assets_with_open_findings}/{svc.total_assets} with open findings
+                          </span>
+                        </div>
+                      ))}
+                      {compliance.frameworks_covered.length > 0 && (
+                        <div style={{ fontSize:11, color:C.dim, marginTop:4 }}>Frameworks: {compliance.frameworks_covered.join(", ")}</div>
+                      )}
+                    </div>
+                  ) : (
+                    <div style={{ fontSize:12, color:C.dim }}>No compliance data yet. Run a scan.</div>
+                  )}
+                </div>
+              </div>
             </>
           )}
 
@@ -1331,6 +1415,17 @@ function Dashboard({ onLogout }: { onLogout: () => void }) {
                       No alerts found. Try running a scan.
                     </div>
                   )}
+                  {hasMoreAlerts && (
+                    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 8, paddingTop: 12 }}>
+                      <button onClick={loadMoreAlerts} disabled={loadingMore} style={{
+                        background: C.hover, color: C.text, border: `1px solid ${C.cardBorder}`,
+                        borderRadius: 8, padding: "8px 18px", fontSize: 12, cursor: loadingMore ? "default" : "pointer",
+                      }}>
+                        {loadingMore ? "Loading…" : `Load more (${allAlerts.length} of ${alertsTotal})`}
+                      </button>
+                      {loadMoreError && <div style={{ fontSize: 11, color: C.red }}>{loadMoreError}</div>}
+                    </div>
+                  )}
                 </div>
               )}
             </div>
@@ -1341,23 +1436,23 @@ function Dashboard({ onLogout }: { onLogout: () => void }) {
               <div style={{ background: C.card, border: `1px solid ${C.cardBorder}`, borderRadius: 12, padding: "20px 24px" }}>
                 <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 4 }}>System Status</div>
                 <div style={{ fontSize: 12, color: C.muted, marginBottom: 20 }}>API and AWS connectivity</div>
-                {healthLoading ? (
+                {deepHealthLoading && !deepHealth ? (
                   <Spinner/>
                 ) : (
                   <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
                     {[
-                      ["API Status", health?.status || "unknown", health?.status === "healthy" ? C.green : C.orange],
-                      ["AWS Region", health?.region || "—", C.text],
-                      ["CloudTrail", health?.cloudtrail_accessible ? "Accessible" : "Not accessible",
-                        health?.cloudtrail_accessible ? C.green : C.red],
-                      ["GuardDuty", health?.guardduty_enabled ? "Enabled" : "Not enabled",
-                        health?.guardduty_enabled ? C.green : C.orange],
-                      ["ML Model", health?.model_loaded ? "Loaded" : "Not trained",
-                        health?.model_loaded ? C.green : C.yellow],
-                      ["Remediation", health?.remediation_enabled ? "Live mode" : "Dry-run mode",
-                        health?.remediation_enabled ? C.green : C.yellow],
-                      ["Storage", health?.storage_backend || "—", C.text],
-                      ["AWS Account", health?.aws_account || "—", C.muted],
+                      ["API Status", deepHealth?.status || "unknown", deepHealth?.status === "healthy" ? C.green : C.orange],
+                      ["AWS Region", deepHealth?.region || "—", C.text],
+                      ["CloudTrail", deepHealth?.cloudtrail_accessible ? "Accessible" : "Not accessible",
+                        deepHealth?.cloudtrail_accessible ? C.green : C.red],
+                      ["GuardDuty", deepHealth?.guardduty_enabled ? "Enabled" : "Not enabled",
+                        deepHealth?.guardduty_enabled ? C.green : C.orange],
+                      ["ML Model", deepHealth?.model_loaded ? "Loaded" : "Not trained",
+                        deepHealth?.model_loaded ? C.green : C.yellow],
+                      ["Remediation", deepHealth?.remediation_enabled ? "Live mode" : "Dry-run mode",
+                        deepHealth?.remediation_enabled ? C.green : C.yellow],
+                      ["Storage", deepHealth?.storage_backend || "—", C.text],
+                      ["AWS Account", deepHealth?.aws_account || "—", C.muted],
                     ].map(([label, value, color]) => (
                       <div key={label} style={{
                         display: "flex", justifyContent: "space-between", alignItems: "center",

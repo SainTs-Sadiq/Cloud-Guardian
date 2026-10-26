@@ -81,6 +81,11 @@ class RemediationResponse(BaseModel):
 
 
 class HealthResponse(BaseModel):
+    """Public liveness response. Intentionally minimal: no AWS detail."""
+    status: str
+
+
+class DeepHealthResponse(BaseModel):
     status: str
     aws_account: Optional[str] = None
     aws_arn: Optional[str] = None

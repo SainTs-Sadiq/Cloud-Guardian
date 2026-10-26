@@ -1,12 +1,14 @@
 """
 Health and MITRE coverage routes.
-Health is public (no auth). Coverage requires authentication.
+GET /health       Cheap unauthenticated liveness check. No AWS calls. Safe for Render health checks.
+GET /health/deep  Authenticated readiness detail: CloudTrail ingest probe + GuardDuty detector listing.
+GET /coverage     MITRE ATT&CK coverage. Requires authentication.
 """
 from pathlib import Path
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from api.models import CoverageResponse, HealthResponse, TacticCoverage
+from api.models import CoverageResponse, DeepHealthResponse, HealthResponse, TacticCoverage
 from core.auth import CurrentUser, get_current_user
 from db.engine import get_db
 from db.repositories.incident_repo import IncidentRepository
@@ -21,7 +23,16 @@ MODEL_PATH = "./data/anomaly_model.joblib"
 
 @router.get("/health", response_model=HealthResponse)
 async def health_check():
-    """Public health check — no auth required. Used by load balancers and monitoring."""
+    """Public liveness check. Makes no AWS calls; returns immediately."""
+    return HealthResponse(status="ok")
+
+
+@router.get("/health/deep", response_model=DeepHealthResponse)
+async def health_deep(current_user: CurrentUser = Depends(get_current_user)):
+    """
+    Authenticated readiness detail. Performs a CloudTrail ingest probe and a
+    GuardDuty detector listing (billable AWS calls), so it is never public.
+    """
     identity = check_credentials()
 
     cloudtrail_ok = False
@@ -41,7 +52,7 @@ async def health_check():
     api_status = ("no_credentials" if not identity["ok"]
                   else "degraded" if not cloudtrail_ok else "healthy")
 
-    return HealthResponse(
+    return DeepHealthResponse(
         status=api_status,
         aws_account=identity.get("account"),
         aws_arn=identity.get("arn"),
@@ -52,7 +63,6 @@ async def health_check():
         remediation_enabled=REMEDIATION.enabled,
         storage_backend="local_jsonl" if STORAGE.use_local_store else "dynamodb",
     )
-
 
 @router.get("/coverage", response_model=CoverageResponse)
 async def mitre_coverage(

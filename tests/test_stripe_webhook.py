@@ -85,3 +85,22 @@ async def test_new_event_id_is_processed_and_recorded():
     handler.assert_awaited_once()
     db.add.assert_called_once()
     db.commit.assert_awaited()
+
+
+
+def test_checkout_stripe_error_returns_generic_message(auth_client):
+    """StripeError detail must never reach the client; the real error is logged server-side."""
+    from stripe import StripeError
+    from tests.test_auth_integration import auth_headers, register_and_login
+    secret = "sk_live_LEAK_CANARY_should_never_reach_client"
+    tokens = register_and_login(auth_client, "stripe-err", "stripe-err@test.com")
+    from dataclasses import replace
+    priced = dict(billing.PLANS)
+    priced["starter"] = replace(billing.PLANS["starter"], stripe_price_id="price_test_123")
+    with patch.object(billing, "get_stripe", side_effect=StripeError(secret)), \
+         patch.object(billing, "PLANS", priced):
+        r = auth_client.post("/billing/checkout", json={"plan": "starter"},
+                             headers=auth_headers(tokens))
+    assert r.status_code == 502
+    assert r.json()["detail"] == "Payment provider error. Please try again later."
+    assert secret not in r.text

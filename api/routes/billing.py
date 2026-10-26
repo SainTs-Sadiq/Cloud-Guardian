@@ -11,6 +11,7 @@ import logging
 import os
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Header
+from stripe import StripeError
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -208,10 +209,12 @@ async def create_checkout_session(
         return CheckoutResponse(checkout_url=session.url, session_id=session.id)
 
     except ValueError as e:
-        raise HTTPException(status_code=503, detail=str(e))
-    except Exception as e:
-        logger.error(f"Stripe checkout error for org {org.id}: {e}", exc_info=True)
-        raise HTTPException(status_code=502, detail=f"Stripe error: {e}")
+        # Raised by get_stripe() when STRIPE_SECRET_KEY is unset. Log the detail, return a generic message.
+        logger.error(f"Stripe not configured for checkout (org {org.id}): {e}")
+        raise HTTPException(status_code=503, detail="Billing is not configured.")
+    except StripeError as e:
+        logger.error(f"Stripe checkout error for org {org.id}: {type(e).__name__}: {e}", exc_info=True)
+        raise HTTPException(status_code=502, detail="Payment provider error. Please try again later.")
 
 
 @router.post("/portal", response_model=PortalResponse)
@@ -240,10 +243,11 @@ async def create_customer_portal(
         return PortalResponse(portal_url=session.url)
 
     except ValueError as e:
-        raise HTTPException(status_code=503, detail=str(e))
-    except Exception as e:
-        logger.error(f"Stripe portal error for org {org.id}: {e}", exc_info=True)
-        raise HTTPException(status_code=502, detail=f"Stripe error: {e}")
+        logger.error(f"Stripe not configured for portal (org {org.id}): {e}")
+        raise HTTPException(status_code=503, detail="Billing is not configured.")
+    except StripeError as e:
+        logger.error(f"Stripe portal error for org {org.id}: {type(e).__name__}: {e}", exc_info=True)
+        raise HTTPException(status_code=502, detail="Payment provider error. Please try again later.")
 
 
 @router.post("/webhook")

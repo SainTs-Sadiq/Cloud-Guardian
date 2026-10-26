@@ -57,6 +57,10 @@ export interface ScanDispatchResponse {
 
 export interface HealthResponse {
   status: string;
+}
+
+export interface DeepHealthResponse {
+  status: string;
   aws_account: string | null;
   aws_arn: string | null;
   region: string;
@@ -276,4 +280,42 @@ export interface VerifyResult {
   assumed_arn?: string;
   guardduty_enabled?: boolean;
   first_scan?: { status: string; alerts_found?: number };
+}
+
+export interface DashboardSummaryResponse {
+  total_findings: number;
+  open_findings: number;
+  findings_by_severity: { critical: number; high: number; medium: number; low: number };
+  connected_accounts: number;
+  active_accounts: number;
+  total_assets: number;
+  risk_posture_score: number;
+  risk_grade: string;
+}
+
+export interface ComplianceControlRollup {
+  control: string;
+  framework: string;
+  open_findings: number;
+}
+
+export interface ComplianceServiceRollup {
+  service: string;
+  total_assets: number;
+  assets_with_open_findings: number;
+  pass_rate: number;
+}
+
+export interface ComplianceResponse {
+  controls: ComplianceControlRollup[];
+  by_service: ComplianceServiceRollup[];
+  frameworks_covered: string[];
+  note: string;
+}
+
+export interface RiskScoreResponse {
+  risk_points: number;
+  posture_score: number;
+  grade: string;
+  breakdown: Record<string, unknown>;
 }
