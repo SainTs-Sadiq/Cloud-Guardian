@@ -1,4 +1,13 @@
 import { useState, useEffect, useCallback, useRef } from "react";
+import type { ReactNode, CSSProperties } from "react";
+import type {
+  AlertListResponse, AlertSummary, AlertDetail, RemediationResponse, ScanResponse,
+  ScanDispatchResponse, HealthResponse, CoverageResponse, TokenResponse, UserProfile,
+  AccountResponse, SetupGuideResponse, CloudFormationTemplateResponse, SubscriptionResponse,
+  AllPlansResponse, CheckoutResponse, PortalResponse, PlaybookMemory, LearningSummary,
+  LearningSettings, PlanInfo, ApiError, ApiErrorBody, ApproveMessage,
+  SimulatorReport, SimulatorScenario, SimulatorResult, VerifyResult, PlaybookObservation,
+} from "./types";
 import {
   LineChart, Line, AreaChart, Area,
   XAxis, YAxis, Tooltip, ResponsiveContainer,
@@ -7,7 +16,7 @@ import {
 
 // Deployment-configurable: runtime override (window.CG_API_URL) wins,
 // then build-time VITE_API_URL, then localhost for dev.
-const API_BASE = (typeof window !== "undefined" && window.CG_API_URL)
+const API_BASE: string = (typeof window !== "undefined" && (window as Window & { CG_API_URL?: string }).CG_API_URL)
   || (import.meta.env && import.meta.env.VITE_API_URL)
   || "http://localhost:8000";
 const POLL_INTERVAL_MS = 30_000;
@@ -20,14 +29,20 @@ const C = {
   text: "#f1f5f9", muted: "#94a3b8", dim: "#475569",
   critical: "#ef4444", high: "#f97316", medium: "#eab308", low: "#22c55e",
 };
-const SEV_COLOR = { critical: C.critical, high: C.high, medium: C.medium, low: C.low };
-const SEV_LABEL = { critical: "Critical", high: "High", medium: "medium", low: "Low" };
+const SEV_COLOR: Record<string, string> = { critical: C.critical, high: C.high, medium: C.medium, low: C.low };
+const SEV_LABEL: Record<string, string> = { critical: "Critical", high: "High", medium: "medium", low: "Low" };
 
-let _token = null;
-const getToken = () => _token;
-const setToken = (t) => { _token = t; };
+let _token: string | null = null;
+const getToken = (): string | null => _token;
+const setToken = (t: string | null): void => { _token = t; };
 
-async function api(path, opts = {}) {
+type ApiOptions = {
+  method?: string;
+  body?: unknown;
+  headers?: Record<string, string>;
+};
+
+async function api<T = any>(path: string, opts: ApiOptions = {}): Promise<T> {
   const token = getToken();
   const res = await fetch(`${API_BASE}${path}`, {
     ...opts,
@@ -38,29 +53,31 @@ async function api(path, opts = {}) {
     },
     body: opts.body ? JSON.stringify(opts.body) : undefined,
   });
-  if (res.status === 401) throw Object.assign(new Error("Unauthorized"), { status: 401 });
+  if (res.status === 401) throw Object.assign(new Error("Unauthorized"), { status: 401 }) as ApiError;
   if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
+    const err: ApiErrorBody = await res.json().catch(() => ({}));
     throw new Error(err.detail || `API error ${res.status}`);
   }
-  return res.json();
+  return res.json() as Promise<T>;
 }
 
-function useApi(path, deps = [], options = {}) {
+type UseApiOptions = { skip?: boolean; interval?: number | null };
+
+function useApi<T = any>(path: string, deps: unknown[] = [], options: UseApiOptions = {}) {
   const { skip = false, interval = null } = options;
-  const [data, setData] = useState(null);
-  const [loading, setLoading] = useState(!skip);
-  const [error, setError] = useState(null);
+  const [data, setData] = useState<T | null>(null);
+  const [loading, setLoading] = useState<boolean>(!skip);
+  const [error, setError] = useState<string | null>(null);
 
   const fetch_ = useCallback(async () => {
     if (skip) return;
     try {
       setLoading(true);
-      const d = await api(path);
+      const d = await api<T>(path);
       setData(d);
       setError(null);
     } catch (e) {
-      setError(e.message);
+      setError((e as Error).message);
     } finally {
       setLoading(false);
     }
@@ -77,21 +94,21 @@ function useApi(path, deps = [], options = {}) {
   return { data, loading, error, refetch: fetch_ };
 }
 
-function timeAgo(iso) {
+function timeAgo(iso: string | null | undefined): string {
   if (!iso) return "—";
-  const diff = (Date.now() - new Date(iso)) / 1000;
+  const diff = (Date.now() - new Date(iso).getTime()) / 1000;
   if (diff < 60) return `${Math.round(diff)}s ago`;
   if (diff < 3600) return `${Math.round(diff / 60)}m ago`;
   if (diff < 86400) return `${Math.round(diff / 3600)}h ago`;
   return `${Math.round(diff / 86400)}d ago`;
 }
 
-function fmtDate(iso) {
+function fmtDate(iso: string | null | undefined): string {
   if (!iso) return "";
   return new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric" });
 }
 
-function deriveStats(alerts, coverage, health) {
+function deriveStats(alerts: AlertListResponse | null, coverage: CoverageResponse | null, health: HealthResponse | null) {
   const all = alerts?.alerts || [];
   const active = all.filter(a => !["remediated","false_positive","suppressed"].includes(a.status));
   const critical = active.filter(a => a.risk_tier === "critical");
@@ -119,7 +136,7 @@ function deriveStats(alerts, coverage, health) {
   };
 }
 
-function deriveThreatActivity(alerts) {
+function deriveThreatActivity(alerts: AlertListResponse | null) {
   const all = alerts?.alerts || [];
   const now = Date.now();
   const days = Array.from({ length: 7 }, (_, i) => {
@@ -143,9 +160,9 @@ function deriveThreatActivity(alerts) {
   });
 }
 
-function deriveTopServices(alerts) {
+function deriveTopServices(alerts: AlertListResponse | null) {
   const all = alerts?.alerts || [];
-  const counts = {};
+  const counts: Record<string, number> = {};
   all.forEach(a => {
     const svc = guessService(a.event_name || "");
     counts[svc] = (counts[svc] || 0) + 1;
@@ -158,7 +175,7 @@ function deriveTopServices(alerts) {
   }));
 }
 
-function guessService(eventName) {
+function guessService(eventName: string): string {
   const e = eventName.toLowerCase();
   if (e.includes("bucket") || e.includes("s3") || e.includes("object")) return "S3";
   if (e.includes("instance") || e.includes("ec2") || e.includes("security")) return "EC2";
@@ -167,7 +184,7 @@ function guessService(eventName) {
   return "IAM";
 }
 
-function deriveRemediationDonut(stats) {
+function deriveRemediationDonut(stats: { remediated: number; pending: number; total: number }) {
   const { remediated, pending, total } = stats;
   const failed = Math.max(0, total - remediated - pending - (total - remediated - pending));
   return [
@@ -177,7 +194,7 @@ function deriveRemediationDonut(stats) {
   ];
 }
 
-function deriveSecScoreTrend(alerts) {
+function deriveSecScoreTrend(alerts: AlertListResponse | null) {
   const all = alerts?.alerts || [];
   return Array.from({ length: 7 }, (_, i) => {
     const d = new Date(Date.now() - (6 - i) * 86400000);
@@ -190,7 +207,7 @@ function deriveSecScoreTrend(alerts) {
   });
 }
 
-function deriveCoverage(coverage) {
+function deriveCoverage(coverage: CoverageResponse | null) {
   const tactics = coverage?.tactics || [];
   const total = coverage?.total_techniques_mapped || 35;
   const mapped = tactics.reduce((s, t) => s + t.technique_count, 0);
@@ -210,9 +227,10 @@ const Spinner = ({ size = 16 }) => (
   }}/>
 );
 
-const Badge = ({ sev, small }) => {
-  const label = SEV_LABEL[sev?.toLowerCase()] || sev || "—";
-  const col = SEV_COLOR[sev?.toLowerCase()] || C.muted;
+const Badge = ({ sev, small }: { sev?: string | null; small?: boolean }) => {
+  const key = sev?.toLowerCase() ?? "";
+  const label = SEV_LABEL[key] || sev || "—";
+  const col = SEV_COLOR[key] || C.muted;
   return (
     <span style={{
       display: "inline-block", padding: small ? "2px 7px" : "3px 9px",
@@ -222,7 +240,7 @@ const Badge = ({ sev, small }) => {
   );
 };
 
-const StatusBadge = ({ status }) => {
+const StatusBadge = ({ status }: { status: string }) => {
   const map = {
     pending_approval: { bg: "#3b82f622", c: "#60a5fa", border: "#3b82f644", label: "Pending" },
     detected:         { bg: "#f9731622", c: "#fb923c", border: "#f9731644", label: "Detected" },
@@ -231,7 +249,7 @@ const StatusBadge = ({ status }) => {
     false_positive:   { bg: "#47556922", c: "#94a3b8", border: "#47556944", label: "Dismissed" },
     notified:         { bg: "#a855f722", c: "#c084fc", border: "#a855f744", label: "Notified" },
   };
-  const s = map[status] || { bg: "#3b82f622", c: "#60a5fa", border: "#3b82f644", label: status };
+  const s = (map as Record<string, { bg: string; c: string; border: string; label: string }>)[status] || { bg: "#3b82f622", c: "#60a5fa", border: "#3b82f644", label: status };
   return (
     <span style={{
       display: "inline-block", padding: "3px 9px", borderRadius: 4,
@@ -240,7 +258,7 @@ const StatusBadge = ({ status }) => {
   );
 };
 
-const MiniSparkline = ({ data, color, height = 36 }) => (
+const MiniSparkline = ({ data, color, height = 36 }: { data: { v: number }[]; color: string; height?: number }) => (
   <ResponsiveContainer width="100%" height={height}>
     <AreaChart data={data} margin={{ top: 2, right: 0, bottom: 0, left: 0 }}>
       <defs>
@@ -255,7 +273,7 @@ const MiniSparkline = ({ data, color, height = 36 }) => (
   </ResponsiveContainer>
 );
 
-const ErrorBanner = ({ message, onRetry }) => (
+const ErrorBanner = ({ message, onRetry }: { message: string; onRetry?: () => void }) => (
   <div style={{
     background: "#ef444411", border: `1px solid #ef444433`, borderRadius: 8,
     padding: "10px 14px", fontSize: 12, color: C.red,
@@ -269,7 +287,7 @@ const ErrorBanner = ({ message, onRetry }) => (
   </div>
 );
 
-const ChartTooltip = ({ active, payload, label }) => {
+const ChartTooltip = ({ active, payload, label }: { active?: boolean; payload?: { name: string; value: number; color: string }[]; label?: string }) => {
   if (!active || !payload?.length) return null;
   return (
     <div style={{
@@ -286,12 +304,12 @@ const ChartTooltip = ({ active, payload, label }) => {
   );
 };
 
-function LoginScreen({ onLogin }) {
+function LoginScreen({ onLogin }: { onLogin: (res: TokenResponse) => void }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState(null);
-  const [mode, setMode] = useState("login");
+  const [error, setError] = useState<string | null>(null);
+  const [mode, setMode] = useState<"login" | "register">("login");
   const [orgName, setOrgName] = useState("");
   const [orgSlug, setOrgSlug] = useState("");
 
@@ -314,13 +332,13 @@ function LoginScreen({ onLogin }) {
         onLogin(res);
       }
     } catch (e) {
-      setError(e.message);
+      setError((e as Error).message);
     } finally {
       setLoading(false);
     }
   }
 
-  const inp = {
+  const inp: CSSProperties = {
     width: "100%", padding: "10px 12px", borderRadius: 8, fontSize: 13,
     background: C.hover, border: `1px solid ${C.cardBorder}`, color: C.text,
     outline: "none", boxSizing: "border-box",
@@ -399,7 +417,10 @@ function LoginScreen({ onLogin }) {
   );
 }
 
-const StatCard = ({ icon, iconBg, label, value, sub, sparkData, sparkColor, loading }) => (
+const StatCard = ({ icon, iconBg, label, value, sub, sparkData, sparkColor, loading }: {
+  icon: ReactNode; iconBg: string; label: string; value: ReactNode; sub?: ReactNode;
+  sparkData?: { v: number }[]; sparkColor: string; loading?: boolean;
+}) => (
   <div style={{
     background: C.card, border: `1px solid ${C.cardBorder}`,
     borderRadius: 12, padding: "16px 18px",
@@ -420,7 +441,7 @@ const StatCard = ({ icon, iconBg, label, value, sub, sparkData, sparkColor, load
       <>
         <div style={{ fontSize: 28, fontWeight: 700, color: C.text, lineHeight: 1 }}>{value}</div>
         {sub && <div style={{ fontSize: 11, marginTop: 5 }}>{sub}</div>}
-        {sparkData?.length > 0 && (
+        {(sparkData?.length ?? 0) > 0 && sparkData && (
           <div style={{ marginTop: 6 }}>
             <MiniSparkline data={sparkData} color={sparkColor || C.accent} height={34}/>
           </div>
@@ -441,13 +462,13 @@ const CONFIG_NAV = [
   "Detection Policies", "Notification Channels", "API Keys",
 ];
 
-function Dashboard({ onLogout }) {
+function Dashboard({ onLogout }: { onLogout: () => void }) {
   const [activeNav, setActiveNav] = useState("Overview");
-  const [approvingId, setApprovingId] = useState(null);
-  const [approveMsg, setApproveMsg] = useState({});
+  const [approvingId, setApprovingId] = useState<string | null>(null);
+  const [approveMsg, setApproveMsg] = useState<Record<string, ApproveMessage>>({});
   const [scanLoading, setScanLoading] = useState(false);
-  const [scanMsg, setScanMsg] = useState(null);
-  const [me, setMe] = useState(null);
+  const [scanMsg, setScanMsg] = useState<ApproveMessage | null>(null);
+  const [me, setMe] = useState<UserProfile | null>(null);
 
   const { data: health, loading: healthLoading, refetch: refetchHealth } =
     useApi("/health", [], { interval: POLL_INTERVAL_MS });
@@ -476,16 +497,16 @@ function Dashboard({ onLogout }) {
 
   const allAlerts = alerts?.alerts || [];
   const recentAlerts = [...allAlerts]
-    .sort((a, b) => new Date(b.event_time) - new Date(a.event_time))
+    .sort((a, b) => new Date(b.event_time).getTime() - new Date(a.event_time).getTime())
     .slice(0, 5);
-  const criticalAlerts = allAlerts.filter(a => a.risk_tier === "critical").slice(0, 5);
+  const criticalAlerts = allAlerts.filter((a: AlertSummary) => a.risk_tier === "critical").slice(0, 5);
   const pendingList = pending?.alerts || [];
 
-  const sparkScore = scoreTrend.map(d => ({ v: d.score }));
-  const sparkThreats = threatActivity.map(d => ({ v: d.critical + d.high }));
-  const sparkCritical = threatActivity.map(d => ({ v: d.critical }));
+  const sparkScore = scoreTrend.map((d: { score: number }) => ({ v: d.score }));
+  const sparkThreats = threatActivity.map((d: { critical: number; high: number }) => ({ v: d.critical + d.high }));
+  const sparkCritical = threatActivity.map((d: { critical: number }) => ({ v: d.critical }));
 
-  async function handleApprove(eventId) {
+  async function handleApprove(eventId: string) {
     setApprovingId(eventId);
     try {
       await api(`/remediation/${eventId}/approve`, {
@@ -494,13 +515,13 @@ function Dashboard({ onLogout }) {
       setApproveMsg(m => ({ ...m, [eventId]: { ok: true, text: "Remediation executed." } }));
       refetchPending(); refetchAlerts();
     } catch (e) {
-      setApproveMsg(m => ({ ...m, [eventId]: { ok: false, text: e.message } }));
+      setApproveMsg(m => ({ ...m, [eventId]: { ok: false, text: (e as Error).message } }));
     } finally {
       setApprovingId(null);
     }
   }
 
-  async function handleDismiss(eventId) {
+  async function handleDismiss(eventId: string) {
     try {
       await api(`/remediation/${eventId}/dismiss`, {
         method: "POST", body: { reason: "Dismissed from dashboard" },
@@ -516,7 +537,7 @@ function Dashboard({ onLogout }) {
       setScanMsg({ ok: true, text: res.message });
       setTimeout(() => { refetchAlerts(); refetchCoverage(); refetchPending(); }, 3000);
     } catch (e) {
-      setScanMsg({ ok: false, text: e.message });
+      setScanMsg({ ok: false, text: (e as Error).message });
     } finally {
       setScanLoading(false);
     }
@@ -524,7 +545,7 @@ function Dashboard({ onLogout }) {
 
   const loading = alertsLoading || healthLoading;
 
-  const tacticIcon = t => ({
+  const tacticIcon = (t: string): string => ({
     "Initial Access": "IA", "Execution": "EX", "Persistence": "PE",
     "Privilege Escalation": "PR", "Defense Evasion": "DE", "Credential Access": "CA",
     "Discovery": "DI", "Lateral Movement": "LM", "Collection": "CO",
@@ -859,7 +880,7 @@ function Dashboard({ onLogout }) {
                       <div style={{ fontSize:32, marginBottom:8, color:C.green }}>✓</div>
                       No active critical threats
                     </div>
-                  ) : criticalAlerts.map(a => (
+                  ) : criticalAlerts.map((a: AlertSummary) => (
                     <div key={a.event_id}
                       onMouseEnter={e=>e.currentTarget.style.background=C.hover}
                       onMouseLeave={e=>e.currentTarget.style.background="transparent"}
@@ -1117,7 +1138,7 @@ function Dashboard({ onLogout }) {
                     ))}</tr>
                   </thead>
                   <tbody>
-                    {allAlerts.map(inc => (
+                    {allAlerts.map((inc: AlertSummary) => (
                       <tr key={inc.event_id}
                         onMouseEnter={e => e.currentTarget.style.background = C.hover}
                         onMouseLeave={e => e.currentTarget.style.background = "transparent"}
@@ -1176,7 +1197,7 @@ function Dashboard({ onLogout }) {
                     <div style={{ fontSize: 32, marginBottom: 8, color: C.green }}>✓</div>
                     No actions pending approval
                   </div>
-                ) : pendingList.map(a => (
+                ) : pendingList.map((a: AlertSummary) => (
                   <div key={a.event_id} style={{
                     border: `1px solid ${C.cardBorder}`, borderRadius: 10,
                     padding: "16px 18px", marginBottom: 10,
@@ -1244,7 +1265,7 @@ function Dashboard({ onLogout }) {
                     ))}</tr>
                   </thead>
                   <tbody>
-                    {allAlerts.filter(a => ["remediated","remediation_failed","false_positive"].includes(a.status)).map(a => (
+                    {allAlerts.filter((a: AlertSummary) => ["remediated","remediation_failed","false_positive"].includes(a.status)).map((a: AlertSummary) => (
                       <tr key={a.event_id}
                         onMouseEnter={e => e.currentTarget.style.background = C.hover}
                         onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
@@ -1257,7 +1278,7 @@ function Dashboard({ onLogout }) {
                         <td style={{ padding: "10px 10px", fontSize: 11, color: C.dim }}>{timeAgo(a.event_time)}</td>
                       </tr>
                     ))}
-                    {allAlerts.filter(a => ["remediated","remediation_failed","false_positive"].includes(a.status)).length === 0 && (
+                    {allAlerts.filter((a: AlertSummary) => ["remediated","remediation_failed","false_positive"].includes(a.status)).length === 0 && (
                       <tr><td colSpan={5} style={{ padding: "32px 0", textAlign: "center", color: C.dim, fontSize: 12 }}>
                         No remediation history yet.
                       </td></tr>
@@ -1276,7 +1297,7 @@ function Dashboard({ onLogout }) {
                 <div style={{ display: "flex", justifyContent: "center", padding: 48 }}><Spinner size={28}/></div>
               ) : (
                 <div style={{ display: "flex", flexDirection: "column", gap: 1 }}>
-                  {allAlerts.map(a => (
+                  {allAlerts.map((a: AlertSummary) => (
                     <div key={a.event_id} style={{
                       display: "flex", alignItems: "center", gap: 14, padding: "12px 10px",
                       borderRadius: 8, borderBottom: `1px solid ${C.cardBorder}`,
@@ -1372,7 +1393,7 @@ function Dashboard({ onLogout }) {
                       Connect your first account →
                     </span>
                   </div>
-                ) : (accounts || []).map(acc => (
+                ) : (accounts || []).map((acc: AccountResponse) => (
                   <div key={acc.id} style={{
                     padding: "14px 16px", borderRadius: 10,
                     border: `1px solid ${C.cardBorder}`, marginBottom: 10,
@@ -1383,7 +1404,7 @@ function Dashboard({ onLogout }) {
                       <div style={{ fontSize: 11, color: C.muted, fontFamily: "monospace" }}>{acc.aws_account_id}</div>
                       <div style={{ fontSize: 11, color: C.dim, marginTop: 2 }}>{acc.primary_region}</div>
                     </div>
-                    <div style={{ display: "flex", align: "center", gap: 8 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                       <span style={{
                         padding: "4px 10px", borderRadius: 6, fontSize: 11, fontWeight: 600,
                         background: acc.status === "active" ? `${C.green}22` : `${C.yellow}22`,
@@ -1431,12 +1452,12 @@ function Dashboard({ onLogout }) {
 }
 
 function AttackSimulatorPage() {
-  const [report, setReport] = useState(null);
-  const [scenarios, setScenarios] = useState([]);
+  const [report, setReport] = useState<SimulatorReport | null>(null);
+  const [scenarios, setScenarios] = useState<SimulatorScenario[]>([]);
   const [loading, setLoading] = useState(false);
   const [pageLoading, setPageLoading] = useState(true);
-  const [error, setError] = useState(null);
-  const [threshold, setThreshold] = useState(30);
+  const [error, setError] = useState<string | null>(null);
+  const [threshold, setThreshold] = useState<number>(30);
 
   const load = useCallback(async () => {
     setPageLoading(true);
@@ -1449,7 +1470,7 @@ function AttackSimulatorPage() {
       setScenarios(scenarioData.scenarios || []);
       setError(null);
     } catch (e) {
-      setError(e.message);
+      setError((e as Error).message);
     } finally {
       setPageLoading(false);
     }
@@ -1463,13 +1484,13 @@ function AttackSimulatorPage() {
       const result = await api(`/simulator/run?threshold=${threshold}`, { method: "POST" });
       setReport(result);
     } catch (e) {
-      setError(e.message);
+      setError((e as Error).message);
     } finally {
       setLoading(false);
     }
   }
 
-  const metric = (label, value) => (
+  const metric = (label: string, value: number | null | undefined) => (
     <div style={{ background: C.card, border: `1px solid ${C.cardBorder}`, borderRadius: 10, padding: 16 }}>
       <div style={{ color: C.muted, fontSize: 11, marginBottom: 8 }}>{label}</div>
       <div style={{ fontSize: 24, fontWeight: 700 }}>{value == null ? "N/A" : `${Math.round(value * 100)}%`}</div>
@@ -1518,7 +1539,7 @@ function AttackSimulatorPage() {
             <div style={{ fontWeight: 700, marginBottom: 12 }}>Confusion matrix</div>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(120px,1fr))", gap: 12 }}>
               {Object.entries(report.confusion_matrix || {}).map(([key, value]) => (
-                <div key={key}><div style={{ color: C.muted, fontSize: 11, textTransform: "capitalize" }}>{key.replaceAll("_", " ")}</div><div style={{ fontSize: 22, fontWeight: 700 }}>{value}</div></div>
+                <div key={key}><div style={{ color: C.muted, fontSize: 11, textTransform: "capitalize" }}>{key.split("_").join(" ")}</div><div style={{ fontSize: 22, fontWeight: 700 }}>{value}</div></div>
               ))}
             </div>
           </div>
@@ -1527,7 +1548,7 @@ function AttackSimulatorPage() {
             <div style={{ overflowX: "auto" }}>
               <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 680 }}>
                 <thead><tr>{["Scenario","Expected","Result","Severity","MITRE mapping"].map(h => <th key={h} style={{ textAlign: "left", padding: 12, color: C.muted, fontSize: 11, borderBottom: `1px solid ${C.cardBorder}` }}>{h}</th>)}</tr></thead>
-                <tbody>{(report.results || []).map(row => <tr key={row.scenario_id}>
+                <tbody>{(report.results || []).map((row: SimulatorResult) => <tr key={row.scenario_id}>
                   <td style={{ padding: 12, borderBottom: `1px solid ${C.cardBorder}` }}><div style={{ fontWeight: 600 }}>{row.scenario_name}</div><div style={{ color: C.dim, fontSize: 10, marginTop: 3 }}>{row.event_name}</div></td>
                   <td style={{ padding: 12, borderBottom: `1px solid ${C.cardBorder}` }}>{row.expected_detection ? "Detect" : "Benign"}</td>
                   <td style={{ padding: 12, borderBottom: `1px solid ${C.cardBorder}`, color: row.detected === row.expected_detection ? C.green : C.red }}>{row.detected ? "Detected" : row.expected_detection ? "Missed" : "Not detected"}</td>
@@ -1540,7 +1561,7 @@ function AttackSimulatorPage() {
         </>}
         <div style={{ background: C.card, border: `1px solid ${C.cardBorder}`, borderRadius: 10, overflow: "hidden" }}>
           <div style={{ padding: 16, fontWeight: 700, borderBottom: `1px solid ${C.cardBorder}` }}>Available synthetic scenarios ({scenarios.length})</div>
-          {scenarios.map(s => <div key={s.id} style={{ padding: "12px 16px", borderBottom: `1px solid ${C.cardBorder}` }}>
+          {scenarios.map((s: SimulatorScenario) => <div key={s.id} style={{ padding: "12px 16px", borderBottom: `1px solid ${C.cardBorder}` }}>
             <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}><span style={{ fontWeight: 600 }}>{s.name}</span><span style={{ color: s.expected_detection ? C.orange : C.green, fontSize: 11 }}>{s.expected_detection ? "Expected detection" : "Benign control"}</span></div>
             <div style={{ color: C.muted, fontSize: 11, marginTop: 5 }}>{s.description}</div>
           </div>)}
@@ -1551,14 +1572,14 @@ function AttackSimulatorPage() {
 }
 
 
-function AccountStatusPill({ status }) {
+function AccountStatusPill({ status }: { status: string }) {
   const map = {
     active:       { bg: `${C.green}22`,  fg: C.green,  label: "Active" },
     pending:      { bg: `${C.yellow}22`, fg: C.yellow, label: "Pending" },
     error:        { bg: `${C.red}22`,    fg: C.red,    label: "Error" },
     disconnected: { bg: `${C.dim}33`,    fg: C.muted,  label: "Disconnected" },
   };
-  const s = map[status] || map.pending;
+  const s = (map as Record<string, { bg: string; fg: string; label: string }>)[status] || map.pending;
   return (
     <span style={{
       padding: "3px 9px", borderRadius: 6, fontSize: 11, fontWeight: 600,
@@ -1567,11 +1588,11 @@ function AccountStatusPill({ status }) {
   );
 }
 
-function isValidRoleArn(arn) {
+function isValidRoleArn(arn: string): boolean {
   return /^arn:aws:iam::\d{12}:role\/[\w+=,.@-]+$/.test((arn || "").trim());
 }
 
-function AWSAccountsPage({ accounts, onRefetch }) {
+function AWSAccountsPage({ accounts, onRefetch }: { accounts: AccountResponse[] | null; onRefetch?: () => void }) {
   const inp = {
     width: "100%", padding: "10px 12px", borderRadius: 8, fontSize: 13,
     background: C.hover, border: `1px solid ${C.cardBorder}`, color: C.text, outline: "none",
@@ -1588,19 +1609,19 @@ function AWSAccountsPage({ accounts, onRefetch }) {
   const card = { background: C.card, border: `1px solid ${C.cardBorder}`, borderRadius: 12, padding: "24px" };
 
   const [wizardOpen, setWizardOpen] = useState(false);
-  const [step, setStep] = useState(1);
-  const [setupTab, setSetupTab] = useState("cloudformation"); // "cloudformation" | "manual"
-  const [form, setForm] = useState({ aws_account_id: "", display_name: "", primary_region: "us-east-1" });
-  const [guide, setGuide] = useState(null);
-  const [cfnTemplate, setCfnTemplate] = useState(null);
+  const [step, setStep] = useState<number>(1);
+  const [setupTab, setSetupTab] = useState<"cloudformation" | "manual">("cloudformation");
+  const [form, setForm] = useState<{ aws_account_id: string; display_name: string; primary_region: string }>({ aws_account_id: "", display_name: "", primary_region: "us-east-1" });
+  const [guide, setGuide] = useState<SetupGuideResponse | null>(null);
+  const [cfnTemplate, setCfnTemplate] = useState<CloudFormationTemplateResponse | null>(null);
   const [roleArn, setRoleArn] = useState("");
-  const [connectedAccount, setConnectedAccount] = useState(null);
-  const [verifyResult, setVerifyResult] = useState(null);
+  const [connectedAccount, setConnectedAccount] = useState<AccountResponse | null>(null);
+  const [verifyResult, setVerifyResult] = useState<VerifyResult | null>(null);
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState(null);
-  const [removingId, setRemovingId] = useState(null);
-  const [reverifyingId, setReverifyingId] = useState(null);
-  const [copied, setCopied] = useState(null);
+  const [error, setError] = useState<string | null>(null);
+  const [removingId, setRemovingId] = useState<string | null>(null);
+  const [reverifyingId, setReverifyingId] = useState<string | null>(null);
+  const [copied, setCopied] = useState<string | null>(null);
 
   function resetWizard() {
     setWizardOpen(false); setStep(1); setSetupTab("cloudformation");
@@ -1609,7 +1630,7 @@ function AWSAccountsPage({ accounts, onRefetch }) {
     setConnectedAccount(null); setVerifyResult(null); setError(null);
   }
 
-  function copy(text, key) {
+  function copy(text: string, key: string) {
     navigator.clipboard?.writeText(text);
     setCopied(key);
     setTimeout(() => setCopied(null), 1500);
@@ -1635,7 +1656,7 @@ function AWSAccountsPage({ accounts, onRefetch }) {
       setCfnTemplate(t);
       setStep(2);
     } catch (e) {
-      setError(e.message);
+      setError((e as Error).message);
     } finally {
       setLoading(false);
     }
@@ -1673,26 +1694,26 @@ function AWSAccountsPage({ accounts, onRefetch }) {
       setStep(4);
       await handleVerify(acc.id);
     } catch (e) {
-      setError(e.message);
+      setError((e as Error).message);
     } finally {
       setLoading(false);
     }
   }
 
-  async function handleVerify(accountId) {
+  async function handleVerify(accountId: string) {
     setLoading(true); setError(null); setVerifyResult(null);
     try {
       const res = await api(`/accounts/${accountId}/verify`, { method: "POST" });
       setVerifyResult({ ok: true, ...res });
       onRefetch?.();
     } catch (e) {
-      setVerifyResult({ ok: false, error: e.message });
+      setVerifyResult({ ok: false, error: (e as Error).message });
     } finally {
       setLoading(false);
     }
   }
 
-  async function handleReverify(accountId) {
+  async function handleReverify(accountId: string) {
     setReverifyingId(accountId);
     try {
       await api(`/accounts/${accountId}/verify`, { method: "POST" });
@@ -1704,14 +1725,14 @@ function AWSAccountsPage({ accounts, onRefetch }) {
     }
   }
 
-  async function handleRemove(accountId) {
+  async function handleRemove(accountId: string) {
     if (!window.confirm("Remove this AWS account? Cloud Guardian will stop scanning it immediately. Past incidents are kept for history.")) return;
     setRemovingId(accountId);
     try {
       await api(`/accounts/${accountId}`, { method: "DELETE" });
       onRefetch?.();
     } catch (e) {
-      setError(e.message);
+      setError((e as Error).message);
     } finally {
       setRemovingId(null);
     }
@@ -1748,7 +1769,7 @@ function AWSAccountsPage({ accounts, onRefetch }) {
             </div>
           ) : (
             <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-              {accounts.map(acc => (
+              {accounts!.map((acc: AccountResponse) => (
                 <div key={acc.id} style={{
                   ...card, padding: "16px 20px",
                   display: "flex", justifyContent: "space-between", alignItems: "center",
@@ -1843,7 +1864,7 @@ function AWSAccountsPage({ accounts, onRefetch }) {
           {step === 2 && guide && (
             <div>
               <div style={{ display: "flex", gap: 4, marginBottom: 18, borderBottom: `1px solid ${C.cardBorder}` }}>
-                {[["cloudformation", "CloudFormation (recommended)"], ["manual", "Manual IAM setup"]].map(([k, l]) => (
+                {([["cloudformation", "CloudFormation (recommended)"], ["manual", "Manual IAM setup"]] as const).map(([k, l]) => (
                   <button key={k} onClick={() => setSetupTab(k)} style={{
                     padding: "8px 14px", border: "none", background: "transparent", cursor: "pointer",
                     fontSize: 12, fontWeight: 600,
@@ -1981,7 +2002,7 @@ function AWSAccountsPage({ accounts, onRefetch }) {
                     what you entered, then retry.
                   </div>
                   <div style={{ display: "flex", gap: 10 }}>
-                    <button onClick={() => handleVerify(connectedAccount.id)} style={btnPrimary}>Retry verification</button>
+                    <button onClick={() => handleVerify(connectedAccount!.id)} style={btnPrimary}>Retry verification</button>
                     <button onClick={() => setStep(2)} style={btnSecondary}>Back to setup</button>
                   </div>
                 </div>
@@ -1994,14 +2015,14 @@ function AWSAccountsPage({ accounts, onRefetch }) {
   );
 }
 
-function BillingPage({ authHeaders }) {
-  const [sub, setSub]         = useState(null);
-  const [plans, setPlans]     = useState([]);
+function BillingPage({ authHeaders }: { authHeaders: Record<string, string> }) {
+  const [sub, setSub]         = useState<SubscriptionResponse | null>(null);
+  const [plans, setPlans]     = useState<PlanInfo[]>([]);
   const [loading, setLoading] = useState(true);
-  const [upgrading, setUpgrading] = useState(null);
+  const [upgrading, setUpgrading] = useState<string | null>(null);
   const [portalLoading, setPortalLoading] = useState(false);
-  const [error, setError]     = useState(null);
-  const [msg, setMsg]         = useState(null);
+  const [error, setError]     = useState<string | null>(null);
+  const [msg, setMsg]         = useState<string | null>(null);
 
   useEffect(() => {
     Promise.all([
@@ -2010,11 +2031,11 @@ function BillingPage({ authHeaders }) {
     ]).then(([subData, plansData]) => {
       setSub(subData);
       setPlans(plansData.plans || []);
-    }).catch(e => setError(e.message))
+    }).catch(e => setError((e as Error).message))
       .finally(() => setLoading(false));
   }, []);
 
-  async function handleUpgrade(planTier) {
+  async function handleUpgrade(planTier: string) {
     setUpgrading(planTier); setMsg(null); setError(null);
     try {
       const res = await fetch(`${API_BASE}/billing/checkout`, {
@@ -2026,7 +2047,7 @@ function BillingPage({ authHeaders }) {
       if (!res.ok) throw new Error(data.detail || "Checkout failed");
       window.location.href = data.checkout_url;
     } catch (e) {
-      setError(e.message);
+      setError((e as Error).message);
     } finally {
       setUpgrading(null);
     }
@@ -2042,7 +2063,7 @@ function BillingPage({ authHeaders }) {
       if (!res.ok) throw new Error(data.detail || "Portal failed");
       window.location.href = data.portal_url;
     } catch (e) {
-      setError(e.message);
+      setError((e as Error).message);
     } finally {
       setPortalLoading(false);
     }
@@ -2058,7 +2079,7 @@ function BillingPage({ authHeaders }) {
       ))
     : 0;
 
-  const planHighlight = {
+  const planHighlight: Record<string, string> = {
     free: "",
     starter: "",
     pro: C.accent,
@@ -2185,7 +2206,7 @@ function BillingPage({ authHeaders }) {
         {plans.map((plan, idx) => {
           const isCurrent  = plan.tier === currentTier;
           const isUpgrade  = PLAN_ORDER.indexOf(plan.tier) > currentIdx;
-          const highlight  = planHighlight[plan.tier];
+          const highlight  = (planHighlight as Record<string, string | undefined>)[plan.tier];
           const isPopular  = plan.tier === "pro";
 
           return (
@@ -2308,13 +2329,13 @@ const STAGE_CONFIG = {
   disabled:              { color: "#ef4444", label: "Disabled" },
 };
 
-function LifecycleBar({ status }) {
+function LifecycleBar({ status }: { status: string }) {
   const stages = ["observing","learning","candidate","pending_graduation","autonomous"];
   const idx = stages.indexOf(status);
   return (
     <div style={{ display:"flex", gap:3, marginTop:8, position:"relative", paddingTop:16 }}>
-      {stages.map((s, i) => {
-        const cfg = STAGE_CONFIG[s];
+      {stages.map((s: string, i: number) => {
+        const cfg = (STAGE_CONFIG as Record<string, { color: string; label: string }>)[s];
         const done = i < idx || status === "autonomous";
         const active = s === status;
         return (
@@ -2340,9 +2361,15 @@ function LifecycleBar({ status }) {
   );
 }
 
-function PlaybookCard({ playbook, onApprove, onDisable, approving, disabling }) {
-  const [expanded, setExpanded] = useState(false);
-  const cfg = STAGE_CONFIG[playbook.status] || STAGE_CONFIG.disabled;
+function PlaybookCard({ playbook, onApprove, onDisable, approving, disabling }: {
+  playbook: PlaybookMemory;
+  onApprove: (id: string) => void;
+  onDisable: (id: string) => void;
+  approving: string | null;
+  disabling: string | null;
+}) {
+  const [expanded, setExpanded] = useState<boolean>(false);
+  const cfg = (STAGE_CONFIG as Record<string, { color: string; label: string }>)[playbook.status] || STAGE_CONFIG.disabled;
   const pct = Math.min(100, Math.round((playbook.instance_count / Math.max(playbook.learning_threshold,1)) * 100));
   return (
     <div style={{
@@ -2446,12 +2473,12 @@ function PlaybookCard({ playbook, onApprove, onDisable, approving, disabling }) 
           }}>{expanded ? "Hide" : "Details"}</button>
         </div>
       </div>
-      {expanded && playbook.observations?.length > 0 && (
+      {expanded && (playbook.observations?.length ?? 0) > 0 && (
         <div style={{ marginTop:12, borderTop:`1px solid ${C.cardBorder}`, paddingTop:12 }}>
           <div style={{ fontSize:11, color:C.dim, marginBottom:8, fontWeight:600 }}>
-            OBSERVATION HISTORY ({playbook.observations.length})
+            OBSERVATION HISTORY ({playbook.observations?.length ?? 0})
           </div>
-          {[...playbook.observations].reverse().slice(0,5).map(obs => (
+          {[...(playbook.observations ?? [])].reverse().slice(0,5).map((obs: PlaybookObservation) => (
             <div key={obs.id} style={{
               display:"flex", justifyContent:"space-between", alignItems:"center",
               padding:"7px 10px", borderRadius:6, marginBottom:4,
@@ -2484,16 +2511,16 @@ function PlaybookCard({ playbook, onApprove, onDisable, approving, disabling }) 
   );
 }
 
-function LearningPage({ authHeaders }) {
-  const [summary,   setSummary]   = useState(null);
-  const [playbooks, setPlaybooks] = useState([]);
-  const [settings,  setSettings]  = useState(null);
+function LearningPage({ authHeaders }: { authHeaders: Record<string, string> }) {
+  const [summary,   setSummary]   = useState<LearningSummary | null>(null);
+  const [playbooks, setPlaybooks] = useState<PlaybookMemory[]>([]);
+  const [settings,  setSettings]  = useState<LearningSettings | null>(null);
   const [loading,   setLoading]   = useState(true);
-  const [filter,    setFilter]    = useState("all");
-  const [approving, setApproving] = useState(null);
-  const [disabling, setDisabling] = useState(null);
-  const [error,     setError]     = useState(null);
-  const [msg,       setMsg]       = useState(null);
+  const [filter,    setFilter]    = useState<string>("all");
+  const [approving, setApproving] = useState<string | null>(null);
+  const [disabling, setDisabling] = useState<string | null>(null);
+  const [error,     setError]     = useState<string | null>(null);
+  const [msg,       setMsg]       = useState<string | null>(null);
 
   const load = async () => {
     setLoading(true); setError(null);
@@ -2506,13 +2533,13 @@ function LearningPage({ authHeaders }) {
       setSummary(sumD);
       setPlaybooks(Array.isArray(pbD) ? pbD : []);
       setSettings(setD);
-    } catch(e) { setError(e.message); }
+    } catch (e) { setError((e as Error).message); }
     finally    { setLoading(false); }
   };
 
   useEffect(() => { load(); }, []);
 
-  async function handleApprove(memoryId) {
+  async function handleApprove(memoryId: string) {
     setApproving(memoryId); setMsg(null); setError(null);
     try {
       const r = await fetch(`${API_BASE}/learning/playbooks/${memoryId}/approve`, {
@@ -2523,11 +2550,11 @@ function LearningPage({ authHeaders }) {
       if (!r.ok) throw new Error((await r.json()).detail || "Approval failed");
       setMsg("✓ Playbook approved — autonomous execution enabled.");
       load();
-    } catch(e) { setError(e.message); }
+    } catch (e) { setError((e as Error).message); }
     finally    { setApproving(null); }
   }
 
-  async function handleDisable(memoryId) {
+  async function handleDisable(memoryId: string) {
     setDisabling(memoryId); setMsg(null); setError(null);
     try {
       const r = await fetch(`${API_BASE}/learning/playbooks/${memoryId}/disable`, {
@@ -2537,7 +2564,7 @@ function LearningPage({ authHeaders }) {
       });
       if (!r.ok) throw new Error((await r.json()).detail || "Disable failed");
       setMsg("Playbook disabled."); load();
-    } catch(e) { setError(e.message); }
+    } catch (e) { setError((e as Error).message); }
     finally    { setDisabling(null); }
   }
 
@@ -2584,14 +2611,14 @@ function LearningPage({ authHeaders }) {
               background:C.card, border:`1px solid ${C.cardBorder}`,
               borderTop:`2px solid ${color}`, borderRadius:10, padding:"12px 14px",
             }}>
-              <div style={{ fontSize:22, fontWeight:700, color }}>{value}</div>
+              <div style={{ fontSize:22, fontWeight:700, color: color as string | undefined }}>{value}</div>
               <div style={{ fontSize:10, color:C.muted, marginTop:2 }}>{label}</div>
             </div>
           ))}
         </div>
       )}
 
-      {summary?.pending_graduation > 0 && (
+      {(summary?.pending_graduation ?? 0) > 0 && (
         <div style={{
           background:`${C.yellow}08`, border:`1px solid ${C.yellow}44`,
           borderRadius:10, padding:"14px 18px",
@@ -2599,7 +2626,7 @@ function LearningPage({ authHeaders }) {
         }}>
           <div>
             <div style={{ fontSize:13, fontWeight:600, color:C.yellow, marginBottom:2 }}>
-              {summary.pending_graduation} playbook{summary.pending_graduation>1?"s":""} awaiting approval
+              {summary!.pending_graduation} playbook{summary!.pending_graduation>1?"s":""} awaiting approval
             </div>
             <div style={{ fontSize:11, color:C.muted }}>
               These patterns have been confirmed enough times to go autonomous. Review and approve.
@@ -2643,7 +2670,7 @@ function LearningPage({ authHeaders }) {
             </span>
           </div>
           <div style={{ display:"flex", gap:5, flexWrap:"wrap" }}>
-            {stageFilters.map(([key,label,color]) => (
+            {(stageFilters as [string, string, any][]).map(([key,label,color]) => (
               <button key={key} onClick={() => setFilter(key)} style={{
                 padding:"4px 10px", borderRadius:20, fontSize:11, cursor:"pointer",
                 border:`1px solid ${filter===key ? (color||C.accent) : C.cardBorder}`,
@@ -2702,7 +2729,7 @@ function LearningPage({ authHeaders }) {
 }
 
 export default function App() {
-  const [authed, setAuthed] = useState(false);
+  const [authed, setAuthed] = useState<boolean>(false);
   return authed
     ? <Dashboard onLogout={() => { setToken(null); setAuthed(false); }}/>
     : <LoginScreen onLogin={() => setAuthed(true)}/>;
