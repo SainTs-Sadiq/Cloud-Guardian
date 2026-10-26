@@ -51,7 +51,6 @@ class TestOrgSettingsEndpoint:
         assert body["scan_frequency"] == "hourly"
         assert body["notification_webhook_url"] == "https://example.com/webhook"
 
-        # Confirm it persisted.
         r = auth_client.get("/organizations/settings", headers=_auth(tokens))
         assert r.json()["scan_frequency"] == "hourly"
 

@@ -36,7 +36,6 @@ def test_redis_failure_falls_back_to_in_process():
     mock_r.pipeline.return_value = pipe
     store._r = mock_r
 
-    # must return an int, not raise
     count = store.count(("10.0.0.1", "global"), time.time())
     assert isinstance(count, int)
     assert count >= 1

@@ -261,7 +261,7 @@ const ErrorBanner = ({ message, onRetry }) => (
     padding: "10px 14px", fontSize: 12, color: C.red,
     display: "flex", justifyContent: "space-between", alignItems: "center",
   }}>
-    <span>⚠ {message}</span>
+    <span>{message}</span>
     {onRetry && <button onClick={onRetry} style={{
       background: "transparent", border: `1px solid ${C.red}`, color: C.red,
       borderRadius: 4, padding: "3px 8px", fontSize: 11, cursor: "pointer",
@@ -431,14 +431,14 @@ const StatCard = ({ icon, iconBg, label, value, sub, sparkData, sparkColor, load
 );
 
 const NAV = [
-  ["⊞", "Overview"], ["⚡", "Incidents"], ["📅", "Threat Timeline"],
-  ["🏗️", "Infrastructure"], ["🔧", "Remediation"], ["📊", "Analytics"],
-  ["✅", "Compliance"], ["📄", "Reports"], ["🧪", "Attack Simulator"], ["🔔", "Alerts"],
-  ["👥", "Team"], ["💳", "Billing"], ["🧠", "Learning"], ["⚙️", "Settings"],
+  "Overview", "Incidents", "Threat Timeline",
+  "Infrastructure", "Remediation", "Analytics",
+  "Compliance", "Reports", "Attack Simulator", "Alerts",
+  "Team", "Billing", "Learning", "Settings",
 ];
 const CONFIG_NAV = [
-  ["☁️", "AWS Accounts"], ["🔗", "Integrations"],
-  ["🛡️", "Detection Policies"], ["📣", "Notification Channels"], ["🔑", "API Keys"],
+  "AWS Accounts", "Integrations",
+  "Detection Policies", "Notification Channels", "API Keys",
 ];
 
 function Dashboard({ onLogout }) {
@@ -525,11 +525,11 @@ function Dashboard({ onLogout }) {
   const loading = alertsLoading || healthLoading;
 
   const tacticIcon = t => ({
-    "Initial Access": "🚪", "Execution": "⚙️", "Persistence": "📌",
-    "Privilege Escalation": "⬆️", "Defense Evasion": "🛡️", "Credential Access": "🔑",
-    "Discovery": "🔍", "Lateral Movement": "↔️", "Collection": "📦",
-    "Exfiltration": "📤", "Impact": "💥",
-  }[t] || "⚡");
+    "Initial Access": "IA", "Execution": "EX", "Persistence": "PE",
+    "Privilege Escalation": "PR", "Defense Evasion": "DE", "Credential Access": "CA",
+    "Discovery": "DI", "Lateral Movement": "LM", "Collection": "CO",
+    "Exfiltration": "XF", "Impact": "IM",
+  }[t] || "?");
 
   return (
     <div style={{
@@ -567,7 +567,7 @@ function Dashboard({ onLogout }) {
         </div>
 
         <nav style={{ padding: "12px 8px", flex: 1 }}>
-          {NAV.map(([icon, label]) => (
+          {NAV.map(label => (
             <button key={label} onClick={() => setActiveNav(label)} style={{
               display: "flex", alignItems: "center", gap: 10, width: "100%",
               padding: "8px 10px", borderRadius: 8, border: "none", cursor: "pointer",
@@ -576,7 +576,7 @@ function Dashboard({ onLogout }) {
               fontWeight: activeNav === label ? 600 : 400,
               fontSize: 13, textAlign: "left", marginBottom: 2, transition: "all 0.15s",
             }}>
-              <span>{icon}</span>{label}
+              {label}
               {label === "Remediation" && pendingList.length > 0 && (
                 <span style={{
                   marginLeft: "auto", background: C.red, color: "#fff",
@@ -591,7 +591,7 @@ function Dashboard({ onLogout }) {
               CONFIGURATION
             </span>
           </div>
-          {CONFIG_NAV.map(([icon, label]) => (
+          {CONFIG_NAV.map(label => (
             <button key={label} onClick={() => setActiveNav(label)} style={{
               display: "flex", alignItems: "center", gap: 10, width: "100%",
               padding: "8px 10px", borderRadius: 8, border: "none", cursor: "pointer",
@@ -600,12 +600,11 @@ function Dashboard({ onLogout }) {
               fontWeight: activeNav === label ? 600 : 400,
               fontSize: 13, textAlign: "left", marginBottom: 2, transition: "all 0.15s",
             }}>
-              <span>{icon}</span>{label}
+              {label}
             </button>
           ))}
         </nav>
 
-        {/* Upgrade card */}
         <div style={{
           margin: "0 12px 12px", padding: 14, borderRadius: 10,
           background: "linear-gradient(135deg,#1e3a5f,#1e2a4a)",
@@ -636,7 +635,6 @@ function Dashboard({ onLogout }) {
       {/* ── Main ── */}
       <main style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0 }}>
 
-        {/* Topbar */}
         <header style={{
           display: "flex", alignItems: "center", justifyContent: "space-between",
           padding: "14px 24px", borderBottom: `1px solid ${C.cardBorder}`,
@@ -649,12 +647,11 @@ function Dashboard({ onLogout }) {
               {health?.status === "healthy"
                 ? "All systems operational."
                 : health?.status === "no_credentials"
-                  ? "⚠ AWS credentials not configured."
-                  : "⚠ Some services degraded."}
+                  ? "AWS credentials not configured."
+                  : "Some services degraded."}
             </div>
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            {/* Account count */}
             <div style={{
               display: "flex", alignItems: "center", gap: 7, padding: "7px 12px",
               background: C.card, border: `1px solid ${C.cardBorder}`, borderRadius: 8, fontSize: 12,
@@ -666,24 +663,21 @@ function Dashboard({ onLogout }) {
               <span>{accounts ? `${accounts.length} Account${accounts.length !== 1 ? "s" : ""}` : "…"}</span>
             </div>
 
-            {/* Scan button */}
             <button onClick={handleScan} disabled={scanLoading} style={{
               display: "flex", alignItems: "center", gap: 6, padding: "7px 14px",
               background: C.accent, border: "none", borderRadius: 8,
               color: "#fff", fontSize: 12, fontWeight: 600, cursor: scanLoading ? "not-allowed" : "pointer",
               opacity: scanLoading ? 0.7 : 1,
             }}>
-              {scanLoading ? <Spinner size={12}/> : "🔍"} Scan Now
+              {scanLoading && <Spinner size={12}/>} Scan Now
             </button>
 
-            {/* Health indicator */}
             <div style={{
               width: 36, height: 36, borderRadius: 8,
               background: C.card, border: `1px solid ${C.cardBorder}`,
               display: "flex", alignItems: "center", justifyContent: "center",
               position: "relative", cursor: "default",
             }}>
-              🔔
               {pendingList.length > 0 && (
                 <span style={{
                   position: "absolute", top: 6, right: 6, width: 8, height: 8,
@@ -692,7 +686,6 @@ function Dashboard({ onLogout }) {
               )}
             </div>
 
-            {/* Avatar */}
             {me && (
               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                 <div style={{
@@ -710,7 +703,6 @@ function Dashboard({ onLogout }) {
           </div>
         </header>
 
-        {/* Scan message */}
         {scanMsg && (
           <div style={{
             padding: "10px 24px",
@@ -719,7 +711,7 @@ function Dashboard({ onLogout }) {
             fontSize: 12,
             color: scanMsg.ok ? C.green : C.red,
           }}>
-            {scanMsg.ok ? "✓" : "⚠"} {scanMsg.text}
+            {scanMsg.ok ? "✓" : "!"} {scanMsg.text}
           </div>
         )}
 
@@ -731,10 +723,9 @@ function Dashboard({ onLogout }) {
               {/* ── Row 1: 6 stat cards ── */}
               <div style={{ display:"grid", gridTemplateColumns:"repeat(6,1fr)", gap:14, marginBottom:20 }}>
 
-                {/* Security Score */}
                 <div style={{ background:C.card, border:`1px solid ${C.cardBorder}`, borderRadius:12, padding:"16px 18px" }}>
                   <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:10 }}>
-                    <div style={{ width:30, height:30, borderRadius:8, background:"#22c55e22", display:"flex", alignItems:"center", justifyContent:"center", fontSize:14 }}>🛡️</div>
+                    <div style={{ width:30, height:30, borderRadius:8, background:"#22c55e22", display:"flex", alignItems:"center", justifyContent:"center", fontSize:14, color:"#22c55e" }}>●</div>
                     <span style={{ fontSize:11, color:C.muted, fontWeight:500 }}>Security Score</span>
                     <span style={{ marginLeft:"auto", fontSize:10, color:C.dim }}>ⓘ</span>
                   </div>
@@ -749,10 +740,9 @@ function Dashboard({ onLogout }) {
                   </>}
                 </div>
 
-                {/* Active Threats */}
                 <div style={{ background:C.card, border:`1px solid ${C.cardBorder}`, borderRadius:12, padding:"16px 18px" }}>
                   <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:10 }}>
-                    <div style={{ width:30, height:30, borderRadius:8, background:"#ef444422", display:"flex", alignItems:"center", justifyContent:"center", fontSize:14 }}>⚡</div>
+                    <div style={{ width:30, height:30, borderRadius:8, background:"#ef444422", display:"flex", alignItems:"center", justifyContent:"center", fontSize:14, color:"#ef4444" }}>●</div>
                     <span style={{ fontSize:11, color:C.muted, fontWeight:500 }}>Active Threats</span>
                     <span style={{ marginLeft:"auto", fontSize:10, color:C.dim }}>ⓘ</span>
                   </div>
@@ -763,10 +753,9 @@ function Dashboard({ onLogout }) {
                   </>}
                 </div>
 
-                {/* Critical Incidents */}
                 <div style={{ background:C.card, border:`1px solid ${C.cardBorder}`, borderRadius:12, padding:"16px 18px" }}>
                   <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:10 }}>
-                    <div style={{ width:30, height:30, borderRadius:8, background:"#f9731622", display:"flex", alignItems:"center", justifyContent:"center", fontSize:14 }}>⚠️</div>
+                    <div style={{ width:30, height:30, borderRadius:8, background:"#f9731622", display:"flex", alignItems:"center", justifyContent:"center", fontSize:14, color:"#f97316" }}>●</div>
                     <span style={{ fontSize:11, color:C.muted, fontWeight:500 }}>Critical Incidents</span>
                     <span style={{ marginLeft:"auto", fontSize:10, color:C.dim }}>ⓘ</span>
                   </div>
@@ -777,10 +766,9 @@ function Dashboard({ onLogout }) {
                   </>}
                 </div>
 
-                {/* Connected Accounts */}
                 <div style={{ background:C.card, border:`1px solid ${C.cardBorder}`, borderRadius:12, padding:"16px 18px" }}>
                   <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:10 }}>
-                    <div style={{ width:30, height:30, borderRadius:8, background:"#3b82f622", display:"flex", alignItems:"center", justifyContent:"center", fontSize:14 }}>☁️</div>
+                    <div style={{ width:30, height:30, borderRadius:8, background:"#3b82f622", display:"flex", alignItems:"center", justifyContent:"center", fontSize:14, color:"#3b82f6" }}>●</div>
                     <span style={{ fontSize:11, color:C.muted, fontWeight:500 }}>Connected Accounts</span>
                     <span style={{ marginLeft:"auto", fontSize:10, color:C.dim }}>ⓘ</span>
                   </div>
@@ -789,10 +777,9 @@ function Dashboard({ onLogout }) {
                   <div style={{ height:36 }}/>
                 </div>
 
-                {/* Resources Protected */}
                 <div style={{ background:C.card, border:`1px solid ${C.cardBorder}`, borderRadius:12, padding:"16px 18px" }}>
                   <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:10 }}>
-                    <div style={{ width:30, height:30, borderRadius:8, background:"#a855f722", display:"flex", alignItems:"center", justifyContent:"center", fontSize:14 }}>🔷</div>
+                    <div style={{ width:30, height:30, borderRadius:8, background:"#a855f722", display:"flex", alignItems:"center", justifyContent:"center", fontSize:14, color:"#a855f7" }}>●</div>
                     <span style={{ fontSize:11, color:C.muted, fontWeight:500 }}>Resources Protected</span>
                     <span style={{ marginLeft:"auto", fontSize:10, color:C.dim }}>ⓘ</span>
                   </div>
@@ -801,10 +788,9 @@ function Dashboard({ onLogout }) {
                   <div style={{ height:36 }}/>
                 </div>
 
-                {/* Remediation Success */}
                 <div style={{ background:C.card, border:`1px solid ${C.cardBorder}`, borderRadius:12, padding:"16px 18px" }}>
                   <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:10 }}>
-                    <div style={{ width:30, height:30, borderRadius:8, background:"#22c55e22", display:"flex", alignItems:"center", justifyContent:"center", fontSize:14 }}>✅</div>
+                    <div style={{ width:30, height:30, borderRadius:8, background:"#22c55e22", display:"flex", alignItems:"center", justifyContent:"center", fontSize:14, color:"#22c55e" }}>●</div>
                     <span style={{ fontSize:11, color:C.muted, fontWeight:500 }}>Remediation Success</span>
                     <span style={{ marginLeft:"auto", fontSize:10, color:C.dim }}>ⓘ</span>
                   </div>
@@ -821,7 +807,6 @@ function Dashboard({ onLogout }) {
               {/* ── Row 2: Threat Activity chart + Active Threats feed ── */}
               <div style={{ display:"grid", gridTemplateColumns:"1fr 380px", gap:16, marginBottom:16 }}>
 
-                {/* Threat Activity */}
                 <div style={{ background:C.card, border:`1px solid ${C.cardBorder}`, borderRadius:12, padding:"18px 20px" }}>
                   <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:16 }}>
                     <div style={{ display:"flex", alignItems:"center", gap:8 }}>
@@ -862,7 +847,6 @@ function Dashboard({ onLogout }) {
                   )}
                 </div>
 
-                {/* Active Threats feed */}
                 <div style={{ background:C.card, border:`1px solid ${C.cardBorder}`, borderRadius:12, padding:"18px 20px" }}>
                   <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:14 }}>
                     <span style={{ fontSize:14, fontWeight:600 }}>Active Threats</span>
@@ -872,7 +856,7 @@ function Dashboard({ onLogout }) {
                     <div style={{ display:"flex", justifyContent:"center", padding:24 }}><Spinner size={20}/></div>
                   ) : criticalAlerts.length === 0 ? (
                     <div style={{ textAlign:"center", padding:"32px 0", color:C.dim, fontSize:12 }}>
-                      <div style={{ fontSize:32, marginBottom:8 }}>✅</div>
+                      <div style={{ fontSize:32, marginBottom:8, color:C.green }}>✓</div>
                       No active critical threats
                     </div>
                   ) : criticalAlerts.map(a => (
@@ -904,7 +888,6 @@ function Dashboard({ onLogout }) {
               {/* ── Row 3: Recent Incidents table + Recent Alerts feed ── */}
               <div style={{ display:"grid", gridTemplateColumns:"1fr 380px", gap:16, marginBottom:16 }}>
 
-                {/* Recent Incidents */}
                 <div style={{ background:C.card, border:`1px solid ${C.cardBorder}`, borderRadius:12, padding:"18px 20px" }}>
                   <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:14 }}>
                     <span style={{ fontSize:14, fontWeight:600 }}>Recent Incidents</span>
@@ -950,7 +933,6 @@ function Dashboard({ onLogout }) {
                   )}
                 </div>
 
-                {/* Recent Alerts feed */}
                 <div style={{ background:C.card, border:`1px solid ${C.cardBorder}`, borderRadius:12, padding:"18px 20px" }}>
                   <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:14 }}>
                     <span style={{ fontSize:14, fontWeight:600 }}>Recent Alerts</span>
@@ -988,7 +970,6 @@ function Dashboard({ onLogout }) {
               {/* ── Row 4: Score Trend + Top Services + Compliance + Remediation Overview ── */}
               <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr 1fr", gap:14 }}>
 
-                {/* Security Score Trend */}
                 <div style={{ background:C.card, border:`1px solid ${C.cardBorder}`, borderRadius:12, padding:"18px 20px" }}>
                   <div style={{ display:"flex", alignItems:"center", gap:6, marginBottom:14 }}>
                     <span style={{ fontSize:14, fontWeight:600 }}>Security Score Trend</span>
@@ -1015,7 +996,6 @@ function Dashboard({ onLogout }) {
                   </div>
                 </div>
 
-                {/* Top Targeted Services */}
                 <div style={{ background:C.card, border:`1px solid ${C.cardBorder}`, borderRadius:12, padding:"18px 20px" }}>
                   <div style={{ display:"flex", alignItems:"center", gap:6, marginBottom:14 }}>
                     <span style={{ fontSize:14, fontWeight:600 }}>Top Targeted Services</span>
@@ -1046,7 +1026,6 @@ function Dashboard({ onLogout }) {
                   )}
                 </div>
 
-                {/* Compliance Status */}
                 <div style={{ background:C.card, border:`1px solid ${C.cardBorder}`, borderRadius:12, padding:"18px 20px" }}>
                   <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:14 }}>
                     <div style={{ display:"flex", alignItems:"center", gap:6 }}>
@@ -1070,7 +1049,6 @@ function Dashboard({ onLogout }) {
                   </div>
                 </div>
 
-                {/* Remediation Overview */}
                 <div style={{ background:C.card, border:`1px solid ${C.cardBorder}`, borderRadius:12, padding:"18px 20px" }}>
                   <div style={{ display:"flex", alignItems:"center", gap:6, marginBottom:14 }}>
                     <span style={{ fontSize:14, fontWeight:600 }}>Remediation Overview</span>
@@ -1183,7 +1161,6 @@ function Dashboard({ onLogout }) {
           {/* ── Remediation page ── */}
           {activeNav === "Remediation" && (
             <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-              {/* Pending approvals */}
               <div style={{ background: C.card, border: `1px solid ${C.cardBorder}`, borderRadius: 12, padding: "20px 24px" }}>
                 <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 4 }}>Pending Approvals</div>
                 <div style={{ fontSize: 12, color: C.muted, marginBottom: 20 }}>
@@ -1196,7 +1173,7 @@ function Dashboard({ onLogout }) {
                   <div style={{ display: "flex", justifyContent: "center", padding: 32 }}><Spinner size={24}/></div>
                 ) : pendingList.length === 0 ? (
                   <div style={{ textAlign: "center", padding: "32px 0", color: C.dim, fontSize: 12 }}>
-                    <div style={{ fontSize: 32, marginBottom: 8 }}>✅</div>
+                    <div style={{ fontSize: 32, marginBottom: 8, color: C.green }}>✓</div>
                     No actions pending approval
                   </div>
                 ) : pendingList.map(a => (
@@ -1229,7 +1206,7 @@ function Dashboard({ onLogout }) {
                         {approveMsg[a.event_id] && (
                           <div style={{ marginTop: 8, fontSize: 11,
                             color: approveMsg[a.event_id].ok ? C.green : C.red }}>
-                            {approveMsg[a.event_id].ok ? "✓" : "⚠"} {approveMsg[a.event_id].text}
+                            {approveMsg[a.event_id].ok ? "✓" : "!"} {approveMsg[a.event_id].text}
                           </div>
                         )}
                       </div>
@@ -1255,7 +1232,6 @@ function Dashboard({ onLogout }) {
                 ))}
               </div>
 
-              {/* Remediation history */}
               <div style={{ background: C.card, border: `1px solid ${C.cardBorder}`, borderRadius: 12, padding: "20px 24px" }}>
                 <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 16 }}>Remediation History</div>
                 <table style={{ width: "100%", borderCollapse: "collapse" }}>
@@ -1339,7 +1315,6 @@ function Dashboard({ onLogout }) {
             </div>
           )}
 
-          {/* ── AWS Accounts page ── */}
           {activeNav === "Settings" && (
             <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
               <div style={{ background: C.card, border: `1px solid ${C.cardBorder}`, borderRadius: 12, padding: "20px 24px" }}>
@@ -1436,18 +1411,15 @@ function Dashboard({ onLogout }) {
             <BillingPage authHeaders={me ? { Authorization: `Bearer ${getToken()}` } : {}} />
           )}
 
-          {/* ── AWS Accounts page ── */}
           {activeNav === "AWS Accounts" && (
             <AWSAccountsPage accounts={accounts} onRefetch={refetchAccounts} />
           )}
 
-          {/* Placeholder for other nav pages */}
           {!["Overview","Incidents","Remediation","Alerts","Billing","Learning","Settings","AWS Accounts","Attack Simulator"].includes(activeNav) && (
             <div style={{
               display: "flex", alignItems: "center", justifyContent: "center",
               minHeight: 400, flexDirection: "column", gap: 12, color: C.dim,
             }}>
-              <div style={{ fontSize: 48 }}>🚧</div>
               <div style={{ fontSize: 16, fontWeight: 600, color: C.muted }}>{activeNav}</div>
               <div style={{ fontSize: 12 }}>This page is coming in the next build sprint.</div>
             </div>
@@ -1766,7 +1738,6 @@ function AWSAccountsPage({ accounts, onRefetch }) {
         <>
           {(accounts || []).length === 0 ? (
             <div style={{ ...card, textAlign: "center", padding: "48px 24px" }}>
-              <div style={{ fontSize: 40, marginBottom: 12 }}>☁️</div>
               <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 6 }}>No AWS accounts connected yet</div>
               <div style={{ fontSize: 13, color: C.muted, marginBottom: 20 }}>
                 Connect your first account to start scanning for misconfigurations.
@@ -2103,7 +2074,6 @@ function BillingPage({ authHeaders }) {
   return (
     <div style={{ display:"flex", flexDirection:"column", gap:20 }}>
 
-      {/* Header */}
       <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start" }}>
         <div>
           <div style={{ fontSize:20, fontWeight:700, marginBottom:4 }}>Billing & Plans</div>
@@ -2118,7 +2088,7 @@ function BillingPage({ authHeaders }) {
             background:C.card, color:C.text, fontSize:12, fontWeight:600,
             cursor:portalLoading ? "not-allowed":"pointer", opacity:portalLoading ? 0.7:1,
           }}>
-            {portalLoading ? <Spinner size={12}/> : "⚙️"} Manage Subscription
+            {portalLoading && <Spinner size={12}/>} Manage Subscription
           </button>
         )}
       </div>
@@ -2131,7 +2101,6 @@ function BillingPage({ authHeaders }) {
         </div>
       )}
 
-      {/* Current plan + usage */}
       <div style={{
         background:C.card, border:`1px solid ${C.cardBorder}`, borderRadius:12,
         padding:"22px 24px",
@@ -2139,7 +2108,6 @@ function BillingPage({ authHeaders }) {
         <div style={{ fontSize:14, fontWeight:600, marginBottom:16 }}>Current Plan</div>
         <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:20 }}>
 
-          {/* Plan details */}
           <div style={{
             padding:16, borderRadius:10, border:`1px solid ${C.cardBorder}`,
             background:C.hover,
@@ -2166,7 +2134,6 @@ function BillingPage({ authHeaders }) {
             )}
           </div>
 
-          {/* Alert usage */}
           <div style={{
             padding:16, borderRadius:10, border:`1px solid ${C.cardBorder}`,
             background:C.hover,
@@ -2190,7 +2157,6 @@ function BillingPage({ authHeaders }) {
             </div>
           </div>
 
-          {/* AWS Accounts */}
           <div style={{
             padding:16, borderRadius:10, border:`1px solid ${C.cardBorder}`,
             background:C.hover,
@@ -2215,7 +2181,6 @@ function BillingPage({ authHeaders }) {
         </div>
       </div>
 
-      {/* Plan cards */}
       <div style={{ display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:14 }}>
         {plans.map((plan, idx) => {
           const isCurrent  = plan.tier === currentTier;
@@ -2309,7 +2274,6 @@ function BillingPage({ authHeaders }) {
         })}
       </div>
 
-      {/* Feature comparison note */}
       <div style={{
         background:C.card, border:`1px solid ${C.cardBorder}`, borderRadius:12,
         padding:"18px 24px",
@@ -2335,13 +2299,13 @@ function BillingPage({ authHeaders }) {
 
 // ─── Learning Page Component ──────────────────────────────────────────────────
 const STAGE_CONFIG = {
-  observing:             { color: "#475569", label: "Observing",         icon: "👁️"  },
-  learning:              { color: "#3b82f6", label: "Learning",          icon: "📚" },
-  candidate:             { color: "#f97316", label: "Candidate",         icon: "🎯" },
-  pending_graduation:    { color: "#eab308", label: "Awaiting Approval", icon: "⏳" },
-  autonomous:            { color: "#22c55e", label: "Autonomous",        icon: "⚡" },
-  continuous_validation: { color: "#a855f7", label: "Under Review",      icon: "🔍" },
-  disabled:              { color: "#ef4444", label: "Disabled",          icon: "🚫" },
+  observing:             { color: "#475569", label: "Observing"  },
+  learning:              { color: "#3b82f6", label: "Learning" },
+  candidate:             { color: "#f97316", label: "Candidate" },
+  pending_graduation:    { color: "#eab308", label: "Awaiting Approval" },
+  autonomous:            { color: "#22c55e", label: "Autonomous" },
+  continuous_validation: { color: "#a855f7", label: "Under Review" },
+  disabled:              { color: "#ef4444", label: "Disabled" },
 };
 
 function LifecycleBar({ status }) {
@@ -2361,7 +2325,7 @@ function LifecycleBar({ status }) {
                 left:`calc(${(i/stages.length)*100}% + ${i*3}px)`,
                 fontSize:9, color:cfg.color, fontWeight:700,
                 whiteSpace:"nowrap",
-              }}>{cfg.icon} {cfg.label}</div>
+              }}>{cfg.label}</div>
             )}
             <div style={{
               height:4, borderRadius:2,
@@ -2388,7 +2352,6 @@ function PlaybookCard({ playbook, onApprove, onDisable, approving, disabling }) 
       <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start" }}>
         <div style={{ flex:1, minWidth:0 }}>
           <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:5 }}>
-            <span style={{ fontSize:15 }}>{cfg.icon}</span>
             <span style={{ fontSize:13, fontWeight:600 }}>{playbook.technique_name}</span>
             <span style={{
               fontSize:10, padding:"2px 7px", borderRadius:4, fontWeight:700,
@@ -2433,7 +2396,7 @@ function PlaybookCard({ playbook, onApprove, onDisable, approving, disabling }) 
               background:`${C.yellow}11`, border:`1px solid ${C.yellow}33`,
               fontSize:11, color:C.yellow,
             }}>
-              ⏳ Ready for graduation — {playbook.instance_count} confirmed instances,
+              Ready for graduation — {playbook.instance_count} confirmed instances,
               confidence {(playbook.confidence_score*100).toFixed(0)}%,
               trust {(playbook.trust_score*100).toFixed(0)}%.
               Approve below to enable autonomous execution.
@@ -2445,7 +2408,7 @@ function PlaybookCard({ playbook, onApprove, onDisable, approving, disabling }) 
               background:`${C.green}11`, border:`1px solid ${C.green}33`,
               fontSize:11, color:C.green,
             }}>
-              ⚡ Autonomous — handling this pattern automatically.
+              Autonomous — handling this pattern automatically.
               {playbook.last_executed_at && ` Last executed: ${timeAgo(playbook.last_executed_at)}.`}
             </div>
           )}
@@ -2455,7 +2418,7 @@ function PlaybookCard({ playbook, onApprove, onDisable, approving, disabling }) 
               background:`${C.purple}11`, border:`1px solid ${C.purple}33`,
               fontSize:11, color:C.purple,
             }}>
-              🔍 Under review — trust dropped. Re-evaluating before restoring autonomous mode.
+              Under review — trust dropped. Re-evaluating before restoring autonomous mode.
             </div>
           )}
         </div>
@@ -2497,7 +2460,7 @@ function PlaybookCard({ playbook, onApprove, onDisable, approving, disabling }) 
             }}>
               <div style={{ fontSize:11 }}>
                 <span style={{ color:obs.was_autonomous?C.purple:C.accent, fontWeight:600 }}>
-                  {obs.was_autonomous ? "⚡ Auto" : "👤 Analyst"}
+                  {obs.was_autonomous ? "Auto" : "Analyst"}
                 </span>
                 <span style={{ color:C.muted, marginLeft:8 }}>{obs.analyst_action?.replace(/_/g," ")}</span>
                 {obs.analyst_notes && (
@@ -2636,7 +2599,7 @@ function LearningPage({ authHeaders }) {
         }}>
           <div>
             <div style={{ fontSize:13, fontWeight:600, color:C.yellow, marginBottom:2 }}>
-              ⏳ {summary.pending_graduation} playbook{summary.pending_graduation>1?"s":""} awaiting approval
+              {summary.pending_graduation} playbook{summary.pending_graduation>1?"s":""} awaiting approval
             </div>
             <div style={{ fontSize:11, color:C.muted }}>
               These patterns have been confirmed enough times to go autonomous. Review and approve.
@@ -2699,8 +2662,7 @@ function LearningPage({ authHeaders }) {
             textAlign:"center", padding:"48px 0", color:C.dim,
             background:C.card, border:`1px solid ${C.cardBorder}`, borderRadius:12,
           }}>
-            <div style={{ fontSize:48, marginBottom:12 }}>🧠</div>
-            <div style={{ fontSize:14, fontWeight:600, color:C.muted, marginBottom:6 }}>
+                        <div style={{ fontSize:14, fontWeight:600, color:C.muted, marginBottom:6 }}>
               {filter==="all" ? "No learned playbooks yet" : `No ${filter} playbooks`}
             </div>
             <div style={{ fontSize:12 }}>
@@ -2721,8 +2683,7 @@ function LearningPage({ authHeaders }) {
         <div style={{ display:"flex", gap:0 }}>
           {Object.entries(STAGE_CONFIG).filter(([k])=>k!=="disabled").map(([key,cfg],i,arr) => (
             <div key={key} style={{ flex:1, textAlign:"center", position:"relative" }}>
-              <div style={{ fontSize:20, marginBottom:4 }}>{cfg.icon}</div>
-              <div style={{ fontSize:10, fontWeight:700, color:cfg.color }}>{cfg.label}</div>
+                            <div style={{ fontSize:10, fontWeight:700, color:cfg.color }}>{cfg.label}</div>
               <div style={{ fontSize:9, color:C.dim, marginTop:3, lineHeight:1.3, padding:"0 2px" }}>
                 {["1-2 sightings","Analyst confirms","Building trust","Admin reviews","Auto-executes","Re-evaluating"][i]}
               </div>

@@ -128,7 +128,6 @@ def scan_s3(session, account_id) -> list[DetectedAlert]:
     for b in buckets:
         name = b["Name"]
 
-        # --- Public access ---
         block_all = False
         try:
             pab = s3.get_public_access_block(Bucket=name)["PublicAccessBlockConfiguration"]
@@ -168,7 +167,6 @@ def scan_s3(session, account_id) -> list[DetectedAlert]:
                                    "and remove any public grants from the bucket ACL or policy.",
                 ))
 
-        # --- Default encryption ---
         try:
             s3.get_bucket_encryption(Bucket=name)
         except ClientError as e:
