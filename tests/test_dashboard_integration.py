@@ -109,7 +109,7 @@ def _seed_misconfigured_account(moto_session):
 
     iam = moto_session.client("iam")
     iam.create_user(UserName="dash-test-user")
-    iam.create_login_profile(UserName="dash-test-user", Password="Sup3rSecret!23")  # no MFA -> finding
+    iam.create_login_profile(UserName="dash-test-user", Password=os.environ.get("CG_TEST_IAM_PASSWORD", "Sup3rSecret!23"))  # no MFA -> finding
 
 
 def _connect_and_verify(client, headers, monkeypatch, moto_session):
