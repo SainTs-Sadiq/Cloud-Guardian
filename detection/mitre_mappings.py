@@ -78,10 +78,9 @@ EVENT_TECHNIQUE_MAP = {
     "PutGroupPolicy": TechniqueMapping("T1098.003","Account Manipulation: Additional Cloud Roles",Tactic.PRIVILEGE_ESCALATION,45,RiskTier.HIGH,"Inline policy attached to group"),
     # Steal / reuse auth material
     "GetFederationToken": TechniqueMapping("T1552.001","Unsecured Credentials: Credentials in Files",Tactic.CREDENTIAL_ACCESS,40,RiskTier.MEDIUM,"Federated token issued - temporary credential minting"),
-    "UpdateSAMLProvider": TechniqueMapping("T1556.009","Modify Authentication Process: SAML-related",Tactic.CREDENTIAL_ACCESS,70,RiskTier.CRITICAL,"SAML provider modified - identity-federation backdoor"),
-    "CreateSAMLProvider": TechniqueMapping("T1556.009","Modify Authentication Process: SAML-related",Tactic.CREDENTIAL_ACCESS,65,RiskTier.CRITICAL,"New SAML provider created - possible rogue federation"),
-    # T1556.009 (Conditional Access Policies) is NOT what SAML provider create/update detects. Left unchanged:
-    # candidates are T1556.007 (Hybrid Identity, covers AD FS federation) or T1484.002 (Trust Modification). Needs a decision.
+    "UpdateSAMLProvider": TechniqueMapping("T1484.002","Trust Modification",Tactic.CREDENTIAL_ACCESS,70,RiskTier.CRITICAL,"SAML provider modified - identity-federation backdoor"),
+    "CreateSAMLProvider": TechniqueMapping("T1484.002","Trust Modification",Tactic.CREDENTIAL_ACCESS,65,RiskTier.CRITICAL,"New SAML provider created - possible rogue federation"),
+    # Mapping corrected from T1556.009 to T1484.002 (Trust Modification, T1484): SAML federation provider changes modify an identity trust, not conditional access policies.
     # Inhibit recovery / impact
     "DeleteDBCluster": TechniqueMapping("T1485","Data Destruction",Tactic.IMPACT,80,RiskTier.CRITICAL,"RDS cluster deleted"),
     "DeleteDBSnapshot": TechniqueMapping("T1490","Inhibit System Recovery",Tactic.DEFENSE_EVASION,75,RiskTier.CRITICAL,"DB snapshot deleted - destroying recovery points"),

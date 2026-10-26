@@ -46,9 +46,8 @@ def test_catalog_index_matches_list():
 # Known name drift between EVENT_TECHNIQUE_MAP display names and the vendored catalog.
 # Left unchanged on purpose (changing a display name changes alert output). Any NEW
 # mismatch fails test_mapped_names_match_catalog_except_known_drift.
-# T1556.009 (Conditional Access Policies) is semantically wrong for SAML provider events; left unchanged
-# pending a decision (see mitre_mappings.py). T1651 name fixed to Cloud Administration Command.
-KNOWN_NAME_DRIFT = {"T1550.001", "T1556.009", "T1578.005", "T1685.002"}
+# T1651 name fixed to Cloud Administration Command. SAML provider events moved T1556.009 -> T1484.002.
+KNOWN_NAME_DRIFT = {"T1550.001", "T1578.005", "T1685.002"}
 
 
 def test_mapped_names_match_catalog_except_known_drift():
