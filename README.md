@@ -7,7 +7,7 @@ Cloud Guardian is a multi-user cloud intrusion detection platform for AWS. It in
 - Backend API: FastAPI (Python 3.13)
 - Background work: Celery workers with Redis as broker
 - Database: PostgreSQL (SQLite for local development)
-- Frontend: React (Vite) single-page app
+- Frontend: React (Vite) single-page app, written in TypeScript
 - Cloud: AWS (CloudTrail, GuardDuty, IAM, STS, SNS)
 
 ## Multi-tenancy and AWS access
@@ -33,7 +33,7 @@ Remediation is fail-closed: a missing role, a missing session, or a failed guard
 - `workers/`: Celery tasks and scheduling for scans and remediation.
 - `db/` and `migrations/`: SQLAlchemy models and Alembic migrations.
 - `simulation/`: attack simulator used for testing detections.
-- `frontend/`: React dashboard.
+- `frontend/`: React dashboard (TypeScript). Build with `npm run build` (runs `tsc --noEmit` then the Vite build).
 - `infra/`: IAM policy documents (detection read-only, auto remediation, destructive remediation, combined remediation) and a CloudFormation template.
 
 ## Security controls
@@ -83,7 +83,7 @@ GitHub Actions runs on pushes and pull requests to `main`, using Python 3.13. Th
 
 ## Deployment
 
-Deployment is leaning toward Render only, not final. The planned layout is a web service (API), a background worker (Celery), a PostgreSQL database, a Redis instance, and a static site for the frontend.
+Deployment is Render via the included `render.yaml` (web service, Celery worker, PostgreSQL, Redis, and a static site for the frontend).
 
 ## Configuration
 
