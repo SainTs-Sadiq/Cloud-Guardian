@@ -122,15 +122,15 @@ services:
         source: /*
         destination: /index.html
 
+  - type: redis
+    name: cloud-guardian-redis
+    plan: starter
+    region: oregon
+    maxmemoryPolicy: noeviction
+
 databases:
   - name: cloud-guardian-db
     plan: basic-256mb
     region: oregon
     databaseName: cloud_guardian
     postgresMajorVersion: "16"
-
-keyvalue:
-  - name: cloud-guardian-redis
-    plan: starter
-    region: oregon
-    maxmemoryPolicy: noeviction
