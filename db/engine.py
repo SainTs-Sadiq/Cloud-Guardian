@@ -56,7 +56,13 @@ async def get_db() -> AsyncSession:
 
 
 async def init_db() -> None:
-    """Create all tables. Call on app startup for SQLite dev. Use Alembic for Postgres."""
+    """Create all tables. Call on app startup for SQLite dev. Use Alembic for Postgres.
+
+    Skipped when CG_SKIP_CREATE_ALL is truthy (production: schema is managed by
+    `alembic upgrade head` as the web service preDeployCommand).
+    """
+    if os.environ.get("CG_SKIP_CREATE_ALL", "").strip().lower() in ("1", "true", "yes"):
+        return
     from db.models import organization, user, aws_account, incident, audit
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
