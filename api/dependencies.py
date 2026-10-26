@@ -8,18 +8,12 @@ into route handlers — not recreated on every request.
 Also houses the future auth dependency placeholder so adding JWT/API
 key auth in the next sprint is a one-line change per route.
 """
-from pathlib import Path
-from functools import lru_cache
 from fastapi import Header, HTTPException, status
 
 from detection.storage import AlertStore, get_store
 from ml.anomaly_detector import AnomalyDetector
 
-MODEL_PATH = "./data/anomaly_model.joblib"
-
-
 _store: AlertStore | None = None
-_detector: AnomalyDetector | None = None
 
 
 def get_alert_store() -> AlertStore:
@@ -29,14 +23,14 @@ def get_alert_store() -> AlertStore:
     return _store
 
 
-def get_anomaly_detector() -> AnomalyDetector | None:
-    global _detector
-    if _detector is None and Path(MODEL_PATH).exists():
-        try:
-            _detector = AnomalyDetector.load(MODEL_PATH)
-        except Exception:
-            pass
-    return _detector
+async def get_anomaly_detector(db) -> AnomalyDetector | None:
+    """Load the global anomaly model from durable DB storage (cached in memory).
+
+    Returns None when no valid model exists; detection then runs without
+    learned state (fail-closed). Never reads from the local filesystem.
+    """
+    from ml.model_store import GLOBAL_SCOPE, load_model
+    return await load_model(db, GLOBAL_SCOPE)
 
 
 async def auth_placeholder():

@@ -4,7 +4,6 @@ GET /health       Cheap unauthenticated liveness check. No AWS calls. Safe for R
 GET /health/deep  Authenticated readiness detail: CloudTrail ingest probe + GuardDuty detector listing.
 GET /coverage     MITRE ATT&CK coverage. Requires authentication.
 """
-from pathlib import Path
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -18,7 +17,6 @@ from detection.mitre_mappings import EVENT_TECHNIQUE_MAP, all_tactics_summary
 from config.settings import AWS, REMEDIATION, STORAGE
 
 router = APIRouter(tags=["System"])
-MODEL_PATH = "./data/anomaly_model.joblib"
 
 
 @router.get("/health", response_model=HealthResponse)
@@ -28,7 +26,10 @@ async def health_check():
 
 
 @router.get("/health/deep", response_model=DeepHealthResponse)
-async def health_deep(current_user: CurrentUser = Depends(get_current_user)):
+async def health_deep(
+    current_user: CurrentUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
     """
     Authenticated readiness detail. Performs a CloudTrail ingest probe and a
     GuardDuty detector listing (billable AWS calls), so it is never public.
@@ -52,6 +53,9 @@ async def health_deep(current_user: CurrentUser = Depends(get_current_user)):
     api_status = ("no_credentials" if not identity["ok"]
                   else "degraded" if not cloudtrail_ok else "healthy")
 
+    from ml.model_store import GLOBAL_SCOPE, load_model
+    model_loaded = (await load_model(db, GLOBAL_SCOPE)) is not None
+
     return DeepHealthResponse(
         status=api_status,
         aws_account=identity.get("account"),
@@ -59,7 +63,7 @@ async def health_deep(current_user: CurrentUser = Depends(get_current_user)):
         region=AWS.region,
         guardduty_enabled=guardduty_ok,
         cloudtrail_accessible=cloudtrail_ok,
-        model_loaded=Path(MODEL_PATH).exists(),
+        model_loaded=model_loaded,
         remediation_enabled=REMEDIATION.enabled,
         storage_backend="local_jsonl" if STORAGE.use_local_store else "dynamodb",
     )

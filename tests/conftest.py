@@ -74,6 +74,8 @@ def auth_client():
 
     app.dependency_overrides[get_db] = override_get_db
     client = TestClient(app, raise_server_exceptions=True)
+    client.session_factory = TestSessionLocal  # lets tests seed rows for an org
+    client.loop = _get_or_create_event_loop()
     yield client
 
     app.dependency_overrides.clear()

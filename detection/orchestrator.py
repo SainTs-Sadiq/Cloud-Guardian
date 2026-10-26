@@ -7,10 +7,10 @@ Usage:
     python -m detection.orchestrator check
 """
 import argparse
+import asyncio
 import logging
 import sys
 import time
-from pathlib import Path
 from config.settings import AWS, DETECTION
 from detection.cloudtrail_ingest import check_credentials, fetch_recent_events
 from detection.guardduty_ingest import fetch_findings, list_active_detectors
@@ -21,7 +21,6 @@ from ml.anomaly_detector import AnomalyDetector, build_actor_history, extract_fe
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 logger = logging.getLogger("cloud_guardian.orchestrator")
 
-MODEL_PATH = "./data/anomaly_model.joblib"
 
 def run_scan(lookback_minutes=None, use_ml=True):
     store = get_store()
@@ -36,15 +35,18 @@ def run_scan(lookback_minutes=None, use_ml=True):
 
     anomaly_detector = None
     actor_histories = {}
-    if use_ml and Path(MODEL_PATH).exists():
-        try:
-            anomaly_detector = AnomalyDetector.load(MODEL_PATH)
+    if use_ml:
+        from db.engine import AsyncSessionLocal
+        from ml.model_store import GLOBAL_SCOPE, load_model
+        async def _load():
+            async with AsyncSessionLocal() as db:
+                return await load_model(db, GLOBAL_SCOPE)
+        anomaly_detector = asyncio.run(_load())
+        if anomaly_detector is not None:
             actor_histories = build_actor_history(ct_events)
             logger.info(f"Loaded anomaly model (trained on {anomaly_detector.n_training_samples} samples).")
-        except Exception as e:
-            logger.warning(f"Could not load anomaly model: {e}")
-    elif use_ml:
-        logger.info(f"No trained model at {MODEL_PATH}. Run `python -m ml.train_baseline` first.")
+    if use_ml and anomaly_detector is None:
+        logger.warning("No stored anomaly model; running without learned state. Run `python -m ml.train_baseline`.")
 
     for event in ct_events:
         ml_score = None
@@ -108,7 +110,7 @@ def run_check():
     from config.settings import REMEDIATION, STORAGE
     print(f"Remediation: {'ENABLED' if REMEDIATION.enabled else 'DRY-RUN (disabled)'}")
     print(f"Storage: {'local JSONL' if STORAGE.use_local_store else 'DynamoDB'}")
-    print(f"Model: {'loaded' if Path(MODEL_PATH).exists() else 'not trained yet — run python -m ml.train_baseline'}")
+    print("Model: stored in database (run python -m ml.train_baseline to train)")
 
 def main():
     parser = argparse.ArgumentParser(description="Cloud Guardian detection engine")

@@ -28,8 +28,6 @@ async def lifespan(app: FastAPI):
     from db.engine import init_db
     await init_db()
 
-    from api.dependencies import get_anomaly_detector
-    get_anomaly_detector()
     logger.info("Cloud Guardian API ready.")
     logger.info("API docs: http://localhost:8000/docs")
     logger.info("Dashboard: http://localhost:3000")

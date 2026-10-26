@@ -36,7 +36,13 @@ from workers.celery_app import app
 
 logger = get_task_logger(__name__)
 
-MODEL_DIR = os.environ.get("CG_MODEL_DIR", "./data/models")
+
+
+async def _load_org_detector(org_id):
+    from db.engine import AsyncSessionLocal
+    from ml.model_store import load_model
+    async with AsyncSessionLocal() as db:
+        return await load_model(db, org_id)
 
 
 def _run_async(coro):
@@ -264,14 +270,12 @@ def _scan_region(session, region, aws_account_db_id, aws_account_id, org_id, loo
         detector = None
         actor_histories = {}
         if use_ml:
-            model_path = Path(MODEL_DIR) / f"{org_id}.joblib"
-            if model_path.exists():
-                from ml.anomaly_detector import AnomalyDetector, build_actor_history
-                try:
-                    detector = AnomalyDetector.load(str(model_path))
-                    actor_histories = build_actor_history(ct_events)
-                except Exception as e:
-                    logger.warning(f"Could not load anomaly model for org {org_id}: {e}")
+            from ml.anomaly_detector import build_actor_history
+            from ml.model_store import load_model
+            # Durable, signed model from the DB; None = run without learned state.
+            detector = _run_async(_load_org_detector(org_id))
+            if detector is not None:
+                actor_histories = build_actor_history(ct_events)
 
         alerts_found = 0
         incidents_to_save = []
@@ -616,12 +620,53 @@ async def _do_remediation(incident_id, org_id, approved_by_id, auto):
             ) if not auto else None
             # Per-call binding: sessions exist only for this handler call and
             # are reset on exit, so nothing leaks to the next task.
+            # Idempotency claim: record the attempt BEFORE the AWS call. A retry or
+            # duplicate delivery that finds the action already succeeded (or still
+            # in flight) must not run the AWS call again.
+            from sqlalchemy import select
+            from db.models.remediation_attempt import RemediationAttempt
+            from datetime import datetime, timezone as _tz
+            action_key = playbook.action.value
+            claim_res = await db.execute(select(RemediationAttempt).where(
+                RemediationAttempt.incident_id == incident_id,
+                RemediationAttempt.action_type == action_key,
+            ))
+            claim = claim_res.scalar_one_or_none()
+            if claim is not None and claim.status in ("succeeded", "running", "unknown"):
+                logger.info(f"[{incident_id}] {action_key} already {claim.status}; skipping duplicate run")
+                return {"status": "already_applied", "detail": (
+                    f"{action_key} already {claim.status} for this incident; not re-executed.")}
+            if claim is None:
+                claim = RemediationAttempt(
+                    organization_id=org_id, incident_id=incident_id, action_type=action_key,
+                    status="running", attempts=1, detail=None,
+                    created_at=datetime.now(_tz.utc), updated_at=datetime.now(_tz.utc))
+                db.add(claim)
+            else:
+                # previous attempt failed: allow exactly one more run, count it
+                claim.status = "running"
+                claim.attempts = (claim.attempts or 1) + 1
+                claim.updated_at = datetime.now(_tz.utc)
+            await db.commit()
+
             with actions.remediation_sessions(auto=customer_session, destructive=destr_session):
                 try:
                     success, detail = handler(alert)
                 except actions.RemediationGuardError as guard:
+                    claim.status, claim.detail = "failed", f"guard refused: {guard}"
+                    await db.commit()
                     logger.error(f"[{incident_id}] guard refused action: {guard}")
                     return {"status": "blocked", "detail": str(guard)}
+                except Exception:
+                    # Unknown outcome: leave 'running' so a retry does NOT repeat a
+                    # possibly-applied AWS change. Operator must reconcile.
+                    claim.status, claim.detail = "unknown", "handler raised; outcome unknown"
+                    await db.commit()
+                    raise
+            claim.status = "succeeded" if success else "failed"
+            claim.detail = str(detail)[:2000]
+            claim.updated_at = datetime.now(_tz.utc)
+            await db.commit()
 
         new_status = IncidentStatus.remediated if success else IncidentStatus.remediation_failed
         resolved_at = datetime.now(timezone.utc) if success else None
@@ -690,13 +735,18 @@ def retrain_anomaly_model(org_id: str, days: int = 14):
     detector = AnomalyDetector(contamination=0.05)
     detector.fit(rows)
 
-    model_dir = Path(MODEL_DIR)
-    model_dir.mkdir(parents=True, exist_ok=True)
-    model_path = model_dir / f"{org_id}.joblib"
-    detector.save(str(model_path))
+    from db.engine import AsyncSessionLocal
+    from ml.model_store import save_model, clear_cache
 
-    logger.info(f"Model retrained for org {org_id}: {len(rows)} samples → {model_path}")
-    return {"status": "ok", "samples": len(rows), "model_path": str(model_path)}
+    async def _persist():
+        async with AsyncSessionLocal() as db:
+            await save_model(db, org_id, detector)
+            await db.commit()
+    _run_async(_persist())
+    clear_cache()
+
+    logger.info(f"Model retrained for org {org_id}: {len(rows)} samples (stored in DB)")
+    return {"status": "ok", "samples": len(rows), "model_scope": org_id}
 
 
 @app.task(name="workers.tasks.retrain_all_models")

@@ -8,6 +8,8 @@ from db.models.playbook_memory import PlaybookMemory, PlaybookObservation, Playb
 from db.models.scan_run import ScanRun, ScanRunStatus, ScanTrigger
 from db.models.asset import Asset
 from db.models.stripe_event import ProcessedStripeEvent
+from db.models.anomaly_model import AnomalyModelRecord
+from db.models.remediation_attempt import RemediationAttempt
 
 __all__ = [
     "Organization", "PlanTier", "ScanFrequency",
@@ -17,5 +19,5 @@ __all__ = [
     "AuditLog",
     "PlaybookMemory", "PlaybookObservation", "PlaybookVersion", "PlaybookStatus", "LIFECYCLE_DESCRIPTIONS",
     "ScanRun", "ScanRunStatus", "ScanTrigger",
-    "Asset",
+    "Asset", "AnomalyModelRecord", "RemediationAttempt",
 ]
